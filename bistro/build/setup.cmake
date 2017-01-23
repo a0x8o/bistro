@@ -7,17 +7,23 @@
 # of patent rights can be found in the PATENTS file in the same directory.
 #
 
+# Do NOT use this -- run build/run-cmake.sh instead & read its docblock.
+
 include_directories(
   # Our includes start with "bistro/bistro/"
   "${PROJECT_SOURCE_DIR}/../.."
   # A hack to include a stub for some FB-specific includes under "common/".
   "${PROJECT_SOURCE_DIR}/build/fbinclude"
+  "${CMAKE_INSTALL_PREFIX}/include"
 )
 
-add_definitions(-std=gnu++0x -Wno-deprecated)
+link_directories("${CMAKE_INSTALL_PREFIX}/lib")
+
+add_definitions(-std=c++14 -Wno-deprecated)
 
 set(
   BISTRO_LINK_DEPS
+  libcrypto.so
   libfolly.so
   libglog.so
   libgflags.so
@@ -27,11 +33,15 @@ set(
   libboost_thread.so
   libboost_filesystem.so
   libdouble-conversion.so
-  libthrift.so
-  libthriftcpp2.so
+  libproxygenhttpserver.so
   libpthread.so
   libsqlite3.so
+  libthrift.so
+  libthriftcpp2.so
+  libthriftprotocol.so
+  libwangle.so
   libz.so
+  libzstd.so
 )
 
 # Use this instead of target_link_libraries() because pretty much everything
@@ -51,7 +61,7 @@ endmacro(bistro_link_libraries)
 
 add_subdirectory(build/deps/gtest-1.7.0)
 enable_testing()
-include_directories(${gtest_SOURCE_DIR}/include ${gtest_SOURCE_DIR})
+include_directories("${gtest_SOURCE_DIR}/include" "${gtest_SOURCE_DIR}")
 
 macro(add_gtest name)
   add_executable(${name} ${name}.cpp)
