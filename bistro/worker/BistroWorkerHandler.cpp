@@ -147,16 +147,28 @@ BistroWorkerHandler::BistroWorkerHandler(
   // different scheduler (take care to initialize your scheduler ID in unit
   // tests!), and that it cannot achieve consensus.
 
-  runInBackgroundLoop(bind(&BistroWorkerHandler::healthcheck, this));
-  runInBackgroundLoop(bind(&BistroWorkerHandler::heartbeat, this));
-  runInBackgroundLoop(bind(&BistroWorkerHandler::notifyFinished, this));
-  runInBackgroundLoop(bind(&BistroWorkerHandler::notifyNotRunning, this));
+  // CAUTION: ThreadedRepeatingFunctionRunner recommends two-stage
+  // initialization for starting threads.  This specific case is safe since:
+  //  - this comes last in the constructor, so the class is fully constructed,
+  //  - this class is final, so no derived classes remain to be constructed.
+  backgroundThreads_.add(
+    "BWH:healthcheck", bind(&BistroWorkerHandler::healthcheck, this)
+  );
+  backgroundThreads_.add(
+    "BWH:heartbeat", bind(&BistroWorkerHandler::heartbeat, this)
+  );
+  backgroundThreads_.add(
+    "BWH:ntfyFnshd", bind(&BistroWorkerHandler::notifyFinished, this)
+  );
+  backgroundThreads_.add(
+    "BWH:ntfyNotRnng", bind(&BistroWorkerHandler::notifyNotRunning, this)
+  );
 }
 
 BistroWorkerHandler::~BistroWorkerHandler() {
   // Block new requests, kill tasks, wait for them to exit, stop our server.
   killTasksAndStop();
-  stopBackgroundThreads();
+  backgroundThreads_.stop();
 }
 
 void BistroWorkerHandler::throwIfSuicidal() {
