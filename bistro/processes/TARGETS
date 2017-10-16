@@ -21,7 +21,11 @@ cpp_library(
         "@/bistro/bistro/physical:physical_lib",
         "@/bistro/bistro/statuses:statuses_lib",
         "@/bistro/bistro/utils:utils_lib",
+        "@/folly:exception",
         "@/folly:subprocess",
+        "@/folly:synchronized",
+        "@/folly/gen:file",
+        "@/folly/gen:string",
         "@/wangle:wangle",
     ],
 )
@@ -35,8 +39,10 @@ cpp_library(
         "SubprocessOutputWithTimeout.h",
     ],
     deps = [
+        "@/folly:exception",
         "@/folly:subprocess",
         "@/folly/futures:futures",
+        "@/folly/gen:string",
     ],
     external_deps = ["libevent"],
 )

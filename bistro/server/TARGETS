@@ -18,10 +18,12 @@ cpp_library(
         "@/bistro/bistro/thrift:conversion_lib",
         "@/common/fb303/cpp:fb303",
         "@/folly:folly",
+        "@/folly:synchronized",
         "@/proxygen/httpserver:httpserver",
+        "@/thrift/lib/cpp2:server",
     ],
     external_deps = [
-        ("boost", None),
+        "boost",
         ("glog", None),
         ("zlib", None, "z"),
     ],

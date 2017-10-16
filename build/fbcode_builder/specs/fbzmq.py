@@ -18,6 +18,7 @@ def fbcode_builder_spec(builder):
         'steps': [
             builder.github_project_workdir('jedisct1/libsodium', '.'),
             builder.step('Build and install jedisct1/libsodium', [
+                builder.run(ShellQuoted('./autogen.sh')),
                 builder.configure(),
                 builder.make_and_install(),
             ]),
@@ -29,7 +30,7 @@ def fbcode_builder_spec(builder):
                 builder.make_and_install(),
             ]),
 
-            builder.fb_github_project_workdir('fbzmq/fbzmq/build', 'facebookincubator'),
+            builder.fb_github_project_workdir('fbzmq/fbzmq/build', 'facebook'),
             builder.step('Build and install fbzmq/fbzmq/build', [
                 builder.cmake_configure('fbzmq/fbzmq/build'),
                 # we need the pythonpath to find the thrift compiler
