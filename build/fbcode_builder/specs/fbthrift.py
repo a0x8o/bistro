@@ -26,6 +26,7 @@ def fbcode_builder_spec(builder):
             # This isn't a separete spec, since only fbthrift uses mstch.
             builder.github_project_workdir('no1msd/mstch', 'build'),
             builder.cmake_install('no1msd/mstch'),
+<<<<<<< HEAD
             builder.github_project_workdir(
                 'rsocket/rsocket-cpp', 'yarpl/build'
             ),
@@ -33,6 +34,8 @@ def fbcode_builder_spec(builder):
                 builder.cmake_configure('rsocket/rsocket-cpp/yarpl/build'),
             ]),
             builder.cmake_install('rsocket/rsocket-cpp/yarpl'),
+=======
+>>>>>>> a8c6f70a1654f6780e3bea937093782ede9230c0
             builder.fb_github_cmake_install('fbthrift/thrift'),
         ],
     }
