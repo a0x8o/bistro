@@ -22,13 +22,8 @@ def fbcode_builder_spec(builder):
             builder.step('Build bistro', [
                 # Future: should this share some code with `cmake_install()`?
                 builder.run(ShellQuoted(
-<<<<<<< HEAD
                     'PATH="$PATH:"{p}/bin '
                     'TEMPLATES_PATH={p}/include/thrift/templates '
-=======
-                    'PATH="$PATH:{p}/bin" '
-                    'TEMPLATES_PATH="{p}/include/thrift/templates" '
->>>>>>> a8c6f70a1654f6780e3bea937093782ede9230c0
                     './cmake/run-cmake.sh Debug -DCMAKE_INSTALL_PREFIX={p}'
                 ).format(p=builder.option('prefix'))),
                 builder.workdir('cmake/Debug'),

@@ -25,12 +25,9 @@ cpp_library(
         "@/bistro/bistro/utils:utils_lib",
         "@/folly:synchronized",
         "@/folly/gen:base",
-<<<<<<< HEAD
     ],
     external_deps = [
         ("boost", None, "boost_filesystem"),
         "boost",
-=======
->>>>>>> a8c6f70a1654f6780e3bea937093782ede9230c0
     ],
 )
