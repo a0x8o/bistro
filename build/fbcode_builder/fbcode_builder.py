@@ -78,6 +78,7 @@ def _read_project_github_hashes():
                     raise RuntimeError('No hash in {0}'.format(path))
                 yield m_proj.group(1), m_hash.group(1)
 
+
 class FBCodeBuilder(object):
 
     def __init__(self, **kwargs):
@@ -102,6 +103,9 @@ class FBCodeBuilder(object):
             raise RuntimeError('Option {0} is required'.format(name))
         self.options_used.add(name)
         return value
+
+    def has_option(self, name):
+        return name in self._options_do_not_access
 
     def add_option(self, name, value):
         if name in self._options_do_not_access:
@@ -262,17 +266,26 @@ class FBCodeBuilder(object):
         ] if git_hash else []
 
         base_dir = self.option('projects_dir')
+        git_patch = self.option('{0}:git_patch'.format(project), '')
+        patch_file = path_join(
+            base_dir,
+            '../shipit_projects' if self.has_option('shipit_project_dir') else '',
+            git_patch
+        )
+        maybe_apply_patch = [
+            self.run(ShellQuoted('git apply {p}').format(p=patch_file)),
+        ] if git_patch else []
+
         local_repo_dir = self.option('{0}:local_repo_dir'.format(project), '')
         return self.step('Check out {0}, workdir {1}'.format(project, path), [
             self.workdir(base_dir),
             self.run(
-                ShellQuoted('git clone https://github.com/{p}')
-                    .format(p=project)
+                ShellQuoted('git clone https://github.com/{p}').format(p=project)
             ) if not local_repo_dir else self.copy_local_repo(
                 local_repo_dir, os.path.basename(project)
             ),
             self.workdir(path_join(base_dir, os.path.basename(project), path)),
-        ] + maybe_change_branch)
+        ] + maybe_change_branch + maybe_apply_patch)
 
     def fb_github_project_workdir(self, project_and_path, github_org='facebook'):
         'This helper lets Facebook-internal CI special-cases FB projects'

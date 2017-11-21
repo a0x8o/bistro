@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2015, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -17,7 +17,7 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include <wangle/concurrent/IOThreadPoolExecutor.h>
+#include <folly/executors/IOThreadPoolExecutor.h>
 
 #include "bistro/bistro/if/gen-cpp2/common_types.h"
 #include "bistro/bistro/physical/AllTasksPhysicalResourceMonitor.h"
@@ -138,7 +138,7 @@ private:
   //  - constructor threw after spawning threads => abort() or leak threads
   //  - threads using partially-constructed object => heisenbugs
   //  - threads using partially-destructed members => heisenbugs
-  wangle::IOThreadPoolExecutor threadPool_;
+  folly::IOThreadPoolExecutor threadPool_;
 };
 
 namespace detail {

@@ -26,7 +26,9 @@ cpp_library(
         "@/folly:synchronized",
         "@/folly/gen:file",
         "@/folly/gen:string",
-        "@/wangle:wangle",
+    ],
+    external_deps = [
+        ("boost", None, "boost_filesystem"),
     ],
 )
 
