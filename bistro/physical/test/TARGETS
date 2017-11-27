@@ -4,6 +4,8 @@ cpp_unittest(
     headers = ["utils.h"],
     deps = [
         "@/bistro/bistro/physical:physical_lib",
+        "@/folly:conv",
+        "@/folly:optional",
         "@/folly/experimental:test_util",
     ],
     external_deps = [("boost", None, "boost_filesystem")],
@@ -15,6 +17,8 @@ cpp_unittest(
     headers = ["utils.h"],
     deps = [
         "@/bistro/bistro/physical:physical_lib",
+        "@/folly:conv",
+        "@/folly:optional",
         "@/folly/experimental:test_util",
     ],
     external_deps = [("boost", None, "boost_filesystem")],
@@ -26,6 +30,8 @@ cpp_unittest(
     headers = ["utils.h"],
     deps = [
         "@/bistro/bistro/physical:physical_lib",
+        "@/folly:conv",
+        "@/folly:optional",
         "@/folly/experimental:test_util",
     ],
     external_deps = [("boost", None, "boost_filesystem")],
@@ -37,6 +43,8 @@ cpp_unittest(
     headers = ["utils.h"],
     deps = [
         "@/bistro/bistro/physical:physical_lib",
+        "@/folly:conv",
+        "@/folly:optional",
         "@/folly/experimental:test_util",
     ],
     external_deps = [("boost", None, "boost_filesystem")],
