@@ -4,6 +4,7 @@ cpp_unittest(
     deps = [
         "@/bistro/bistro/processes:processes",
         "@/folly:exception",
+        "@/folly:file",
     ],
 )
 
@@ -16,7 +17,10 @@ cpp_unittest(
 cpp_unittest(
     name = "test_async_subprocess",
     srcs = ["test_async_subprocess.cpp"],
-    deps = ["@/bistro/bistro/processes:processes"],
+    deps = [
+        "@/bistro/bistro/processes:processes",
+        "@/folly:mpmc_queue",
+    ],
 )
 
 cpp_unittest(
@@ -31,6 +35,7 @@ cpp_unittest(
     deps = [
         "@/bistro/bistro/processes:processes",
         "@/bistro/bistro/test:test_lib",
+        "@/folly:json",
         "@/folly/experimental:test_util",
     ],
 )

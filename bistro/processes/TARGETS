@@ -23,7 +23,10 @@ cpp_library(
         "@/bistro/bistro/utils:utils_lib",
         "@/folly:conv",
         "@/folly:exception",
+        "@/folly:file",
+        "@/folly:json",
         "@/folly:logging",
+        "@/folly:mpmc_queue",
         "@/folly:string",
         "@/folly:subprocess",
         "@/folly:synchronized",
@@ -45,6 +48,7 @@ cpp_library(
     ],
     deps = [
         "@/folly:exception",
+        "@/folly:file",
         "@/folly:subprocess",
         "@/folly/futures:futures",
         "@/folly/gen:string",
