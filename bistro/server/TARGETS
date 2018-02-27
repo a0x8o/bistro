@@ -23,6 +23,10 @@ cpp_library(
         "//folly:json",
         "//folly:mpmc_queue",
         "//folly:synchronized",
+<<<<<<< HEAD
+=======
+        "//folly/experimental:auto_timer",
+>>>>>>> 9c1c72dcae1f9e475a1805ad7da7e760ae1b4b71
         "//proxygen/httpserver:httpserver",
         "//thrift/lib/cpp2:server",
     ],

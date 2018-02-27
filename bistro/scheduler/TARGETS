@@ -33,14 +33,26 @@ cpp_library(
         "utils.h",
     ],
     deps = [
+<<<<<<< HEAD
         "//bistro/bistro/config:config_lib",
         "//bistro/bistro/flags:flags_lib",
         "//bistro/bistro/nodes:nodes_lib",
         "//bistro/bistro/scheduler:scheduler_policy_registry_lib",
+=======
+        ":scheduler_policy_registry_lib",
+        "//bistro/bistro/config:config_lib",
+        "//bistro/bistro/flags:flags_lib",
+        "//bistro/bistro/nodes:nodes_lib",
+>>>>>>> 9c1c72dcae1f9e475a1805ad7da7e760ae1b4b71
         "//bistro/bistro/statuses:statuses_lib",
         "//bistro/bistro/utils:utils_lib",
         "//folly:memory",
         "//folly:singleton",
+<<<<<<< HEAD
+=======
+        "//folly:small_vector",
+        "//folly/experimental:auto_timer",
+>>>>>>> 9c1c72dcae1f9e475a1805ad7da7e760ae1b4b71
     ],
     external_deps = ["boost"],
 )

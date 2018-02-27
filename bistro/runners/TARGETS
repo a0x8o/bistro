@@ -27,7 +27,14 @@ cpp_library(
         "//folly:json",
         "//folly:random",
         "//folly:synchronized",
+<<<<<<< HEAD
         "//folly/gen:base",
+=======
+        "//folly/experimental:auto_timer",
+        "//folly/experimental:threaded_repeating_function_runner",
+        "//folly/gen:base",
+        "//folly/io/async:async",
+>>>>>>> 9c1c72dcae1f9e475a1805ad7da7e760ae1b4b71
     ],
     external_deps = [
         ("boost", None, "boost_filesystem"),

@@ -51,11 +51,19 @@ cpp_library(
         "Exception.h",
     ],
     deps = [
+<<<<<<< HEAD
         "//bistro/bistro/if:if-cpp2",
         "//bistro/bistro/sqlite:sqlite_lib",
         "//bistro/bistro/utils:exception_lib",
         "//bistro/bistro/utils:hostname_lib",
         "//bistro/bistro/utils:shell_lib",
+=======
+        ":exception_lib",
+        ":hostname_lib",
+        ":shell_lib",
+        "//bistro/bistro/if:if-cpp2",
+        "//bistro/bistro/sqlite:sqlite_lib",
+>>>>>>> 9c1c72dcae1f9e475a1805ad7da7e760ae1b4b71
         "//folly:conv",
         "//folly:dynamic",
         "//folly:optional",
@@ -66,6 +74,10 @@ cpp_library(
         "//folly:synchronized",
         "//folly/experimental:auto_timer",
         "//folly/experimental:threaded_repeating_function_runner",
+<<<<<<< HEAD
+=======
+        "//folly/io/async:server_socket",
+>>>>>>> 9c1c72dcae1f9e475a1805ad7da7e760ae1b4b71
     ],
     external_deps = [
         ("boost", None, "boost_regex"),

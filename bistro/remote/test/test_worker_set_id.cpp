@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2015, Facebook, Inc.
+ *  Copyright (c) 2015-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -22,7 +22,8 @@ cpp2::BistroInstanceID instanceID(int64_t start_time, int64_t rand) {
 
 // Hide from the "integer overflow in expression" warning.
 int64_t add(int64_t a, int64_t b) {
-  return a + b;
+  return static_cast<int64_t>(
+      static_cast<uint64_t>(a) + static_cast<uint64_t>(b));
 }
 
 TEST(TestWorkerSetHash, Exact) {

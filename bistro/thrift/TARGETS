@@ -7,6 +7,10 @@ cpp_library(
         "//bistro/bistro/if:if-cpp2",
         "//folly:dynamic",
         "//folly:json",
+<<<<<<< HEAD
+=======
+        "//folly/experimental:dynamic_parser",
+>>>>>>> 9c1c72dcae1f9e475a1805ad7da7e760ae1b4b71
     ],
 )
 

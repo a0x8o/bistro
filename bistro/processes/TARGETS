@@ -31,8 +31,16 @@ cpp_library(
         "//folly:string",
         "//folly:subprocess",
         "//folly:synchronized",
+<<<<<<< HEAD
         "//folly/gen:file",
         "//folly/gen:string",
+=======
+        "//folly/executors:io_thread_pool_executor",
+        "//folly/futures:core",
+        "//folly/gen:file",
+        "//folly/gen:string",
+        "//folly/io/async:async",
+>>>>>>> 9c1c72dcae1f9e475a1805ad7da7e760ae1b4b71
     ],
     external_deps = [
         ("boost", None, "boost_filesystem"),
@@ -52,8 +60,15 @@ cpp_library(
         "//folly:file",
         "//folly:file_util",
         "//folly:subprocess",
+<<<<<<< HEAD
         "//folly/futures:futures",
         "//folly/gen:string",
+=======
+        "//folly/futures:core",
+        "//folly/futures:futures",
+        "//folly/gen:string",
+        "//folly/io/async:async",
+>>>>>>> 9c1c72dcae1f9e475a1805ad7da7e760ae1b4b71
     ],
     external_deps = ["libevent"],
 )
