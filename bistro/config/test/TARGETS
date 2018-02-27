@@ -4,7 +4,9 @@ cpp_unittest(
         "test_job_filters.cpp",
     ],
     deps = [
-        "@/bistro/bistro/config:config_lib",
+        "//bistro/bistro/config:config_lib",
+        "//folly:conv",
+        "//folly:dynamic",
     ],
 )
 
@@ -14,8 +16,10 @@ cpp_unittest(
         "test_job.cpp",
     ],
     deps = [
-        "@/bistro/bistro/config:config_lib",
-        "@/folly/experimental:test_util",
+        "//bistro/bistro/config:config_lib",
+        "//folly:conv",
+        "//folly:json",
+        "//folly/experimental:test_util",
     ],
 )
 
@@ -25,7 +29,7 @@ cpp_unittest(
         "test_node.cpp",
     ],
     deps = [
-        "@/bistro/bistro/config:config_lib",
+        "//bistro/bistro/config:config_lib",
     ],
 )
 
@@ -35,7 +39,9 @@ cpp_unittest(
         "test_config.cpp",
     ],
     deps = [
-        "@/bistro/bistro/config:config_lib",
+        "//bistro/bistro/config:config_lib",
+        "//folly:conv",
+        "//folly:dynamic",
     ],
 )
 
@@ -45,7 +51,7 @@ cpp_unittest(
         "test_backoff.cpp",
     ],
     deps = [
-        "@/bistro/bistro/config:config_lib",
+        "//bistro/bistro/config:config_lib",
     ],
 )
 
@@ -55,7 +61,9 @@ cpp_unittest(
         "test_file_config_loader.cpp",
     ],
     deps = [
-        "@/bistro/bistro/config:config_lib",
+        "//bistro/bistro/config:config_lib",
+        "//folly:conv",
+        "//folly:dynamic",
     ],
     external_deps = [("boost", None, "boost_filesystem")],
 )
@@ -66,6 +74,6 @@ cpp_unittest(
         "test_task_placement.cpp",
     ],
     deps = [
-        "@/bistro/bistro/config:config_lib",
+        "//bistro/bistro/config:config_lib",
     ],
 )

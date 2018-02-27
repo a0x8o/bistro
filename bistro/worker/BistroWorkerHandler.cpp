@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -341,21 +341,22 @@ void BistroWorkerHandler::runTask(
     cmd.empty() ? vector<string>{workerCommand_} : cmd,
     config,  // Job config argument -- DO: elide the extra copy?
     jobsDir_ / rt.job,  // Working directory for the task
-    [this](const cpp2::RunningTask& rt, TaskStatus&& status) noexcept {
+    [this](const cpp2::RunningTask& runningTask, TaskStatus&& status) noexcept {
       // 10 tasks / sec
-      folly::AutoTimer<> timer(
+      folly::AutoTimer<> updateQueueTimer(
           "Task update queue was slow", std::chrono::milliseconds{100});
       notifyFinishedQueue_.blockingWrite(std::make_unique<NotifyData>(
-        TaskID{rt.job, rt.node}, std::move(status)
+        TaskID{runningTask.job, runningTask.node}, std::move(status)
       ));
-      logStateTransitionFn_("completed_task", worker_, &rt);
+      logStateTransitionFn_("completed_task", worker_, &runningTask);
     },
     [this](
-      const cpp2::RunningTask& rt, cpp2::TaskPhysicalResources&& res
+      const cpp2::RunningTask& runningTask, cpp2::TaskPhysicalResources&& res
     ) noexcept {
       SYNCHRONIZED(runningTasks_) {
-        auto it = runningTasks_.find({rt.job, rt.node});
-        CHECK (it != runningTasks_.end()) << "Bad task: " << debugString(rt);
+        auto it = runningTasks_.find({runningTask.job, runningTask.node});
+        CHECK (it != runningTasks_.end()) << "Bad task: "
+                                          << debugString(runningTask);
         it->second.physicalResources = std::move(res);
         it->second.__isset.physicalResources = true;
       }
@@ -517,7 +518,7 @@ void BistroWorkerHandler::throwOnInstanceIDMismatch(
   );
 }
 
-chrono::seconds BistroWorkerHandler::notifyFinished() noexcept {
+std::chrono::seconds BistroWorkerHandler::notifyFinished() noexcept {
   // Not checking commitedSuicide_ here since, in rare cases, some good can
   // come out of these notifications (the tasks are already done, so we
   // might as well try to report them if the scheduler will listen).
@@ -530,12 +531,12 @@ chrono::seconds BistroWorkerHandler::notifyFinished() noexcept {
     );
   } catch (const exception& e) {
     LOG(ERROR) << "notifyFinished: Unable to get client for scheduler";
-    return chrono::seconds(5);
+    return std::chrono::seconds(5);
   }
   std::unique_ptr<NotifyData> nd;
   for (int i = 0; i < 100; ++i) {
     if (!notifyFinishedQueue_.read(nd)) {
-      return chrono::seconds(1);
+      return std::chrono::seconds(1);
     }
     // Copy the RunningTask so that we don't have to lock runningTasks_
     // while we send the notification.
@@ -561,7 +562,7 @@ chrono::seconds BistroWorkerHandler::notifyFinished() noexcept {
       logStateTransitionFn_("scheduler_failed_to_acknowledge", worker_, &rt);
       LOG(ERROR) << "Unable to return status to scheduler: " << e.what();
       notifyFinishedQueue_.blockingWrite(std::move(nd));
-      return chrono::seconds(1);
+      return std::chrono::seconds(1);
     }
     SYNCHRONIZED(runningTasks_) {
       CHECK(runningTasks_.erase(nd->taskID) == 1)
@@ -573,7 +574,7 @@ chrono::seconds BistroWorkerHandler::notifyFinished() noexcept {
     }
     logStateTransitionFn_("acknowledged_by_scheduler", worker_, &rt);
   }
-  return chrono::seconds(0);
+  return std::chrono::seconds(0);
 }
 
 /**
@@ -584,7 +585,7 @@ chrono::seconds BistroWorkerHandler::notifyFinished() noexcept {
  * overwriteable "was not running" status to allow the scheduler to
  * reschedule the task.
  */
-chrono::seconds BistroWorkerHandler::notifyNotRunning() noexcept {
+std::chrono::seconds BistroWorkerHandler::notifyNotRunning() noexcept {
   // Just as with notifyFinished, there is no benefit to checking
   // committingSuicide_ here.
 
@@ -596,12 +597,12 @@ chrono::seconds BistroWorkerHandler::notifyNotRunning() noexcept {
     );
   } catch (const exception& e) {
     LOG(ERROR) << "notifyNotRunning: Unable to get client for scheduler";
-    return chrono::seconds(5);
+    return std::chrono::seconds(5);
   }
   cpp2::RunningTask rt;
   for (int i = 0; i < 100; ++i) {
     if (!notifyNotRunningQueue_.read(rt)) {
-      return chrono::seconds(1);
+      return std::chrono::seconds(1);
     }
     try {
       auto scheduler_id = schedulerState_->id;  // Don't hold the lock
@@ -615,10 +616,10 @@ chrono::seconds BistroWorkerHandler::notifyNotRunning() noexcept {
     } catch (const exception& e) {
       LOG(ERROR) << "Cannot send non-running task to scheduler: " << e.what();
       notifyNotRunningQueue_.blockingWrite(std::move(rt));
-      return chrono::seconds(1);
+      return std::chrono::seconds(1);
     }
   }
-  return chrono::seconds(0);
+  return std::chrono::seconds(0);
 }
 
 void BistroWorkerHandler::setState(
@@ -643,9 +644,9 @@ void BistroWorkerHandler::setState(
     || (new_state == RemoteWorkerState::State::HEALTHY);
 }
 
-chrono::seconds BistroWorkerHandler::heartbeat() noexcept {
+std::chrono::seconds BistroWorkerHandler::heartbeat() noexcept {
   if (committingSuicide_.load()) {  // Stop sending heartbeats once dying.
-    return chrono::seconds(1);
+    return std::chrono::seconds(1);
   }
   if (!canConnectToMyself_) {
     // Make a transient event base since we only use it for one sync call.
@@ -665,7 +666,7 @@ chrono::seconds BistroWorkerHandler::heartbeat() noexcept {
     } catch (const apache::thrift::TException& e) {
       LOG(WARNING) << "Waiting for this worker to start listening on "
         << debugString(worker_.addr) << ": " << e.what();
-      return chrono::seconds(1);
+      return std::chrono::seconds(1);
     }
     logStateTransitionFn_("listening", worker_, nullptr);
   }
@@ -754,12 +755,12 @@ chrono::seconds BistroWorkerHandler::heartbeat() noexcept {
     LOG(ERROR) << "Unable to send heartbeat to scheduler: " << e.what();
     logStateTransitionFn_("error_sending_heartbeat", worker_, nullptr);
   }
-  return chrono::seconds(worker_.heartbeatPeriodSec);
+  return std::chrono::seconds(worker_.heartbeatPeriodSec);
 }
 
-chrono::seconds BistroWorkerHandler::healthcheck() noexcept {
+std::chrono::seconds BistroWorkerHandler::healthcheck() noexcept {
   if (committingSuicide_.load()) {  // No point in updating state_ any more.
-    return chrono::seconds(1);
+    return std::chrono::seconds(1);
   }
   try {
     time_t cur_time = time(nullptr);
@@ -798,7 +799,7 @@ chrono::seconds BistroWorkerHandler::healthcheck() noexcept {
     logStateTransitionFn_("health_checker_bug", worker_, nullptr);
     killTasksAndStop();
   }
-  return chrono::seconds(1);  // This is cheap, so check often.
+  return std::chrono::seconds(1);  // This is cheap, so check often.
 }
 
 void BistroWorkerHandler::getJobLogsByID(

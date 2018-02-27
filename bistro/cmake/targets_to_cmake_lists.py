@@ -1,4 +1,11 @@
 #!/usr/bin/env python2.7
+# Copyright (c) 2017-present, Facebook, Inc.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree. An additional grant
+# of patent rights can be found in the PATENTS file in the same directory.
+
 '''
 
 Converts Facebook's internal TARGETS files into CMakeLists.txt, used by
@@ -26,7 +33,7 @@ def parse_targets(dirpath, s):
     #
 
     def _dep_name(s):
-        if not re.match('^(:|@/bistro/bistro[:/])', s):
+        if not re.match('^(:|//bistro/bistro[:/])', s):
             return None
         if s.endswith('-cpp2'):
             # Handled specially by run-cmake.sh, has a special CMakeLists.txt
@@ -102,6 +109,7 @@ def parse_targets(dirpath, s):
         _validate_keys(kwargs, 'cpp_library', {
             'srcs',  # Handled above
             'deps',  # Handled above
+            'external_deps',  # Handled in cmake/setup.cmake
             'headers',  # CMake handles headers automatically
         })
 
@@ -113,6 +121,7 @@ def parse_targets(dirpath, s):
             'deps',  # Handled above
             'external_deps',  # Handled in cmake/setup.cmake
             'headers',  # CMake handles headers automatically
+            'undefined_symbols',  # Ignored
         })
 
     def cpp_unittest(name, **kwargs):

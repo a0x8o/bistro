@@ -15,19 +15,32 @@ cpp_library(
         "TaskRunner.h",
     ],
     deps = [
-        "@/bistro/bistro/config:config_lib",
-        "@/bistro/bistro/if:if-cpp2",
-        "@/bistro/bistro/if:worker_if-cpp2",
-        "@/bistro/bistro/nodes:nodes_lib",
-        "@/bistro/bistro/processes:processes",
-        "@/bistro/bistro/remote:remote_lib",
-        "@/bistro/bistro/statuses:statuses_lib",
-        "@/bistro/bistro/utils:utils_lib",
-        "@/folly:synchronized",
-        "@/folly/gen:base",
+        "//bistro/bistro/config:config_lib",
+        "//bistro/bistro/if:if-cpp2",
+        "//bistro/bistro/if:worker_if-cpp2",
+        "//bistro/bistro/nodes:nodes_lib",
+        "//bistro/bistro/processes:processes",
+        "//bistro/bistro/remote:remote_lib",
+        "//bistro/bistro/statuses:statuses_lib",
+        "//bistro/bistro/utils:utils_lib",
+        "//folly:conv",
+        "//folly:json",
+        "//folly:random",
+        "//folly:synchronized",
+        "//folly/experimental:auto_timer",
+        "//folly/experimental:threaded_repeating_function_runner",
+        "//folly/gen:base",
+        "//folly/io/async:async",
     ],
     external_deps = [
         ("boost", None, "boost_filesystem"),
         "boost",
     ],
+<<<<<<< HEAD
+    external_deps = [
+        ("boost", None, "boost_filesystem"),
+        "boost",
+    ],
+=======
+>>>>>>> 9c1c72dcae1f9e475a1805ad7da7e760ae1b4b71
 )

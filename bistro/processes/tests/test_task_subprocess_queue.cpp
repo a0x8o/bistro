@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 2017, Facebook, Inc.
+ *  Copyright (c) 2017-present, Facebook, Inc.
  *  All rights reserved.
  *
  *  This source code is licensed under the BSD-style license found in the
@@ -264,14 +264,14 @@ struct TestTaskSubprocessQueue : public ::testing::Test {
       },
       "json_arg",
       ".",
-      [](const cpp2::RunningTask& rt, TaskStatus&& status) noexcept {
-        EXPECT_EQ("job", rt.job);
-        EXPECT_EQ("node", rt.node);
+      [](const cpp2::RunningTask& rt2, TaskStatus&& status) noexcept {
+        EXPECT_EQ("job", rt2.job);
+        EXPECT_EQ("node", rt2.node);
         EXPECT_TRUE(status.isDone());
       },
-      [this](const cpp2::RunningTask& rt, cpp2::TaskPhysicalResources&&) {
-        EXPECT_EQ("job", rt.job);
-        EXPECT_EQ("node", rt.node);
+      [this](const cpp2::RunningTask& rt2, cpp2::TaskPhysicalResources&&) {
+        EXPECT_EQ("job", rt2.job);
+        EXPECT_EQ("node", rt2.node);
       },
       opts
     );
@@ -286,8 +286,7 @@ struct TestTaskSubprocessQueue : public ::testing::Test {
 
 void checkNormalTaskLogs(
     const TestLogWriter::TaskLogs& logs,
-    const std::vector<std::string>& cmd,
-    const cpp2::RunningTask& rt) {
+    const std::vector<std::string>& cmd) {
 
   EXPECT_EQ(std::vector<std::string>{"stdout\n"}, logs.stdout_);
   EXPECT_EQ(std::vector<std::string>{"stderr\n"}, logs.stderr_);
@@ -312,8 +311,8 @@ void checkNormalTaskLogs(
     auto getExpectedEvent = [&]() {  // has_raw_status can change
       auto expected_event = proto_expected_event;
       expected_event["worker_host"] = logs.events_[0]["worker_host"];
-      expected_event["invocation_start_time"] = rt.invocationID.startTime;
-      expected_event["invocation_rand"] = rt.invocationID.rand;
+      expected_event["invocation_start_time"] = 0;
+      expected_event["invocation_rand"] = 0;
       if (has_raw_status) {
         expected_event["raw_status"] = "done";
       }
@@ -321,9 +320,10 @@ void checkNormalTaskLogs(
     };
     // If the common order doesn't work, try swapping the events.
     if ((event_idx == 2 || event_idx == 3) && getExpectedEvent() != *event) {
-      // No raw status if the process exits before the pipes are closed.
-      has_raw_status = event_idx == 2;
       event = &logs.events_[4 - event_idx];
+      // We MUST have raw status once the pipes are closed, and we MAY
+      // have it when the process exits.
+      has_raw_status = event_idx == 2 || event->count("raw_status");
     }
     EXPECT_EQ(getExpectedEvent(), *event);
   }
@@ -348,14 +348,14 @@ TEST_F(TestTaskSubprocessQueue, NormalRun) {
       cmd,
       "json_arg",
       ".",
-      [](const cpp2::RunningTask& rt, TaskStatus&& status) noexcept {
-        EXPECT_EQ("job", rt.job);
-        EXPECT_EQ("node", rt.node);
+      [](const cpp2::RunningTask& rt2, TaskStatus&& status) noexcept {
+        EXPECT_EQ("job", rt2.job);
+        EXPECT_EQ("node", rt2.node);
         EXPECT_TRUE(status.isDone());
       },
-      [this](const cpp2::RunningTask& rt, cpp2::TaskPhysicalResources&&) {
-        EXPECT_EQ("job", rt.job);
-        EXPECT_EQ("node", rt.node);
+      [this](const cpp2::RunningTask& rt2, cpp2::TaskPhysicalResources&&) {
+        EXPECT_EQ("job", rt2.job);
+        EXPECT_EQ("node", rt2.node);
       },
       cpp2::TaskSubprocessOptions()  // defaults should be ok
     );
@@ -372,7 +372,7 @@ TEST_F(TestTaskSubprocessQueue, NormalRun) {
     cmd.insert(cmd.end(), {
       "node", folly::to<std::string>("/dev/fd/", pipe_fd), "json_arg"
     });
-    checkNormalTaskLogs(task_to_logs[std::make_pair("job", "node")], cmd, rt);
+    checkNormalTaskLogs(task_to_logs[std::make_pair("job", "node")], cmd);
   }
 }
 
@@ -393,23 +393,23 @@ TEST_F(TestTaskSubprocessQueue, MoreTasksThanThreads) {
   {
     TaskSubprocessQueue tsq(std::make_unique<TestLogWriter>(&task_to_logs));
     for (int i = 0; i < kNumTasks; ++i) {
-      auto node = folly::to<std::string>("node", i);
+      auto node = folly::to<std::string>("node", i);  // ID tasks by the node
       rt.node = node;
       tsq.runTask(
         rt,
         cmd,
         "json_arg",
         ".",
-        [node](const cpp2::RunningTask& rt, TaskStatus&& status) noexcept {
-          EXPECT_EQ("job", rt.job);
-          EXPECT_EQ(node, rt.node);
+        [node](const cpp2::RunningTask& rt2, TaskStatus&& status) noexcept {
+          EXPECT_EQ("job", rt2.job);
+          EXPECT_EQ(node, rt2.node);
           EXPECT_TRUE(status.isDone());
         },
         [node, this](
-          const cpp2::RunningTask& rt, cpp2::TaskPhysicalResources&&
+          const cpp2::RunningTask& rt2, cpp2::TaskPhysicalResources&&
         ) {
-          EXPECT_EQ("job", rt.job);
-          EXPECT_EQ(node, rt.node);
+          EXPECT_EQ("job", rt2.job);
+          EXPECT_EQ(node, rt2.node);
         },
         cpp2::TaskSubprocessOptions()  // defaults should be ok
       );
@@ -430,9 +430,7 @@ TEST_F(TestTaskSubprocessQueue, MoreTasksThanThreads) {
       full_cmd.insert(full_cmd.end(), {
         node, folly::to<std::string>("/dev/fd/", pipe_fd), "json_arg"
       });
-      checkNormalTaskLogs(
-        task_to_logs[std::make_pair("job", node)], full_cmd, rt
-      );
+      checkNormalTaskLogs(task_to_logs[std::make_pair("job", node)], full_cmd);
     }
   }
 }
@@ -448,9 +446,9 @@ TEST_F(TestTaskSubprocessQueue, NoStatus) {
       std::vector<std::string>{"/bin/echo"},
       "json_arg",
       ".",
-      [](const cpp2::RunningTask& rt, TaskStatus&& status) noexcept {
-        EXPECT_EQ("job", rt.job);
-        EXPECT_EQ("node", rt.node);
+      [](const cpp2::RunningTask& rt2, TaskStatus&& status) noexcept {
+        EXPECT_EQ("job", rt2.job);
+        EXPECT_EQ("node", rt2.node);
         EXPECT_EQ(
           TaskStatusBits::Error | TaskStatusBits::UsesBackoff,
           status.bits()
@@ -460,9 +458,9 @@ TEST_F(TestTaskSubprocessQueue, NoStatus) {
           (*status.dataThreadUnsafe()).at("exception").asString()
         );
       },
-      [this](const cpp2::RunningTask& rt, cpp2::TaskPhysicalResources&&) {
-        EXPECT_EQ("job", rt.job);
-        EXPECT_EQ("node", rt.node);
+      [this](const cpp2::RunningTask& rt2, cpp2::TaskPhysicalResources&&) {
+        EXPECT_EQ("job", rt2.job);
+        EXPECT_EQ("node", rt2.node);
       },
       cpp2::TaskSubprocessOptions()  // defaults should be ok
     );
@@ -626,14 +624,14 @@ TEST_F(TestTaskSubprocessQueue, RateLimitLog) {
       cmd,
       "json_arg",
       ".",
-      [](const cpp2::RunningTask& rt, TaskStatus&& status) noexcept {
-        EXPECT_EQ("job", rt.job);
-        EXPECT_EQ("node", rt.node);
+      [](const cpp2::RunningTask& rt2, TaskStatus&& status) noexcept {
+        EXPECT_EQ("job", rt2.job);
+        EXPECT_EQ("node", rt2.node);
         EXPECT_TRUE(status.isDone());
       },
-      [this](const cpp2::RunningTask& rt, cpp2::TaskPhysicalResources&&) {
-        EXPECT_EQ("job", rt.job);
-        EXPECT_EQ("node", rt.node);
+      [this](const cpp2::RunningTask& rt2, cpp2::TaskPhysicalResources&&) {
+        EXPECT_EQ("job", rt2.job);
+        EXPECT_EQ("node", rt2.node);
       },
       opts
     );
@@ -882,7 +880,7 @@ TEST_F(TestTaskSubprocessQueue, AsyncCGroupReaperWithFreezer) {
     // Since these aren't real cgroups, the directories cannot be removed,
     // but the logs show evidence that we tried.
     EXPECT_PCRE_MATCH(folly::to<std::string>(
-      ".*\nW[^\n]*] Failed to remove empty cgroup: ", cgDir("cpu"),
+      "(^|.*\n)W[^\n]*] Failed to remove empty cgroup: ", cgDir("cpu"),
       ": Directory not empty",
       "\nW[^\n]*] Failed to remove empty cgroup: ", cgDir("freezer"),
       ": Directory not empty\n.*"

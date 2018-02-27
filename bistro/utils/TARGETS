@@ -2,7 +2,7 @@ cpp_library(
     name = "exception_lib",
     srcs = ["Exception.cpp"],
     headers = ["Exception.h"],
-    deps = ["@/folly:conv"],
+    deps = ["//folly:conv"],
 )
 
 cpp_library(
@@ -19,7 +19,7 @@ cpp_library(
     name = "shell_lib",
     srcs = ["shell.cpp"],
     headers = ["shell.h"],
-    deps = ["@/folly:string"],
+    deps = ["//folly:string"],
     external_deps = ["boost"],
 )
 
@@ -51,20 +51,37 @@ cpp_library(
         "Exception.h",
     ],
     deps = [
-        "@/bistro/bistro/if:if-cpp2",
-        "@/bistro/bistro/sqlite:sqlite_lib",
-        "@/bistro/bistro/utils:exception_lib",
-        "@/bistro/bistro/utils:hostname_lib",
-        "@/bistro/bistro/utils:shell_lib",
-        "@/folly:folly",
-        "@/folly:synchronized",
-        "@/folly/experimental:auto_timer",
-        "@/folly/experimental:threaded_repeating_function_runner",
+        ":exception_lib",
+        ":hostname_lib",
+        ":shell_lib",
+        "//bistro/bistro/if:if-cpp2",
+        "//bistro/bistro/sqlite:sqlite_lib",
+        "//folly:conv",
+        "//folly:dynamic",
+        "//folly:optional",
+        "//folly:random",
+        "//folly:range",
+        "//folly:scope_guard",
+        "//folly:string",
+        "//folly:synchronized",
+        "//folly/experimental:auto_timer",
+        "//folly/experimental:threaded_repeating_function_runner",
+        "//folly/io/async:server_socket",
     ],
     external_deps = [
         ("boost", None, "boost_regex"),
         ("boost", None, "boost_filesystem"),
         "boost",
         "gflags",
+        "glog",
     ],
+<<<<<<< HEAD
+    external_deps = [
+        ("boost", None, "boost_regex"),
+        ("boost", None, "boost_filesystem"),
+        "boost",
+        "gflags",
+    ],
+=======
+>>>>>>> 9c1c72dcae1f9e475a1805ad7da7e760ae1b4b71
 )

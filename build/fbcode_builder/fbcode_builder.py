@@ -206,6 +206,7 @@ class FBCodeBuilder(object):
                 'libtool '
                 'netcat-openbsd '
                 'pkg-config '
+                'sudo '
                 'unzip '
                 'wget'
             )),
@@ -245,6 +246,15 @@ class FBCodeBuilder(object):
                 'apt-get upgrade -yq cmake'
             )))
 
+        # Debian 8.6 comes with a CMake version that is too old for folly.
+        if self.option('os_image') == 'debian:8.6':
+            actions.append(self.run(ShellQuoted(
+                'echo deb http://ftp.debian.org/debian jessie-backports main '
+                '>> /etc/apt/sources.list.d/jessie-backports.list && '
+                'apt-get update && '
+                'apt-get -yq -t jessie-backports install cmake'
+            )))
+
         actions.extend(self.debian_ccache_setup_steps())
 
         return self.step('Install packages for Debian-based OS', actions)
@@ -266,6 +276,7 @@ class FBCodeBuilder(object):
         ] if git_hash else []
 
         base_dir = self.option('projects_dir')
+<<<<<<< HEAD
         git_patch = self.option('{0}:git_patch'.format(project), '')
         patch_file = path_join(
             base_dir,
@@ -275,6 +286,8 @@ class FBCodeBuilder(object):
         maybe_apply_patch = [
             self.run(ShellQuoted('git apply {p}').format(p=patch_file)),
         ] if git_patch else []
+=======
+>>>>>>> 9c1c72dcae1f9e475a1805ad7da7e760ae1b4b71
 
         local_repo_dir = self.option('{0}:local_repo_dir'.format(project), '')
         return self.step('Check out {0}, workdir {1}'.format(project, path), [

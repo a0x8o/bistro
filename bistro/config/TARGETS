@@ -26,6 +26,7 @@ cpp_library(
         "parsing_common.h",
     ],
     deps = [
+<<<<<<< HEAD
         "@/bistro:headers",
         "@/bistro/bistro/if:common-cpp2",
         "@/bistro/bistro/scheduler:scheduler_policy_registry_lib",
@@ -34,6 +35,22 @@ cpp_library(
         "@/folly:folly",
         "@/folly:synchronized",
         "@/folly/experimental:dynamic_parser",
+=======
+        "//bistro:headers",
+        "//bistro/bistro/if:common-cpp2",
+        "//bistro/bistro/scheduler:scheduler_policy_registry_lib",
+        "//bistro/bistro/utils:utils_lib",
+        "//folly:conv",
+        "//folly:dynamic",
+        "//folly:fbstring",
+        "//folly:json",
+        "//folly:memory",
+        "//folly:optional",
+        "//folly:sorted_vector_types",
+        "//folly:synchronized",
+        "//folly/experimental:dynamic_parser",
+        "//folly/hash:hash",
+>>>>>>> 9c1c72dcae1f9e475a1805ad7da7e760ae1b4b71
     ],
     external_deps = [
         ("boost", None, "boost_filesystem"),
