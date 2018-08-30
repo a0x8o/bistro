@@ -154,8 +154,9 @@ class FBCodeBuilder(object):
         return self.step('Diagnostics', [
             self.comment('Builder {0}'.format(repr(self))),
             self.run(ShellQuoted('hostname')),
-            self.run(ShellQuoted('cat /etc/issue')),
+            self.run(ShellQuoted('cat /etc/issue || echo no /etc/issue')),
             self.run(ShellQuoted('g++ --version || echo g++ not installed')),
+            self.run(ShellQuoted('cmake --version || echo cmake not installed')),
         ])
 
     def step(self, name, actions):
@@ -216,14 +217,6 @@ class FBCodeBuilder(object):
         ]
         gcc_version = self.option('gcc_version')
 
-        # We need some extra packages to be able to install GCC 4.9 on 14.04.
-        if self.option('os_image') == 'ubuntu:14.04' and gcc_version == '4.9':
-            actions.append(self.run(ShellQuoted(
-                'apt-get install -yq software-properties-common && '
-                'add-apt-repository ppa:ubuntu-toolchain-r/test && '
-                'apt-get update'
-            )))
-
         # Make the selected GCC the default before building anything
         actions.extend([
             self.run(ShellQuoted('apt-get install -yq {c} {cpp}').format(
@@ -240,30 +233,12 @@ class FBCodeBuilder(object):
             self.run(ShellQuoted('update-alternatives --config gcc')),
         ])
 
-        # Ubuntu 14.04 comes with a CMake version that is too old for mstch.
-        if self.option('os_image') == 'ubuntu:14.04':
-            actions.append(self.run(ShellQuoted(
-                'apt-get install -yq software-properties-common && '
-                'add-apt-repository ppa:george-edison55/cmake-3.x && '
-                'apt-get update && '
-                'apt-get upgrade -yq cmake'
-            )))
-
-        # Debian 8.6 comes with a CMake version that is too old for folly.
-        if self.option('os_image') == 'debian:8.6':
-            actions.append(self.run(ShellQuoted(
-                'echo deb http://ftp.debian.org/debian jessie-backports main '
-                '>> /etc/apt/sources.list.d/jessie-backports.list && '
-                'apt-get update && '
-                'apt-get -yq -t jessie-backports install cmake'
-            )))
-
         actions.extend(self.debian_ccache_setup_steps())
 
         return self.step('Install packages for Debian-based OS', actions)
 
     def debian_ccache_setup_steps(self):
-        raise []  # It's ok to ship a renderer without ccache support.
+        return []  # It's ok to ship a renderer without ccache support.
 
     def github_project_workdir(self, project, path):
         # Only check out a non-default branch if requested. This especially
