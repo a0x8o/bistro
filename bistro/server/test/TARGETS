@@ -1,3 +1,6 @@
+load("@fbcode_macros//build_defs:cpp_library.bzl", "cpp_library")
+load("@fbcode_macros//build_defs:cpp_unittest.bzl", "cpp_unittest")
+
 cpp_library(
     name = "thrift_monitor_test_thread_lib",
     srcs = ["ThriftMonitorTestThread.cpp"],
@@ -18,7 +21,7 @@ cpp_unittest(
     srcs = ["test_thrift_monitor.cpp"],
     deps = [
         ":thrift_monitor_test_thread_lib",
-        "//folly/io/async:async",
+        "//folly/io/async:event_base_manager",
     ],
 )
 

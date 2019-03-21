@@ -44,9 +44,13 @@ HTTPMonitor::HTTPMonitor(
     monitor_(monitor) {
 }
 
-fbstring HTTPMonitor::handleRequest(const fbstring& request) {
+fbstring HTTPMonitor::handleRequest(const fbstring& request, bool isSecure) {
   LOG(INFO) << "HTTPMonitor request: " << request;
-  folly::AutoTimer<> timer("Handled HTTP monitor request");
+  folly::AutoTimer<> timer(
+    isSecure
+      ? "Handled HTTPS monitor request"
+      : "Handled HTTP monitor request"
+  );
   dynamic ret = dynamic::object;
   try {
     dynamic d(parseJson(request));
@@ -163,8 +167,8 @@ dynamic HTTPMonitor::handleSingle(const Config& c, const dynamic& d) {
       throw BistroException("Unknown job ", job);
     }
     // Look up the running task
-    const Job::ID job_id(Job::JobNameTable.asConst()->lookup(job));
-    const Node::ID node_id(Node::NodeNameTable.asConst()->lookup(node));
+    const Job::ID job_id(as_const(Job::JobNameTable)->lookup(job));
+    const Node::ID node_id(as_const(Node::NodeNameTable)->lookup(node));
     auto maybe_rt = taskStatuses_->copyRunningTask(job_id, node_id);
     if (!maybe_rt.hasValue()) {
       throw BistroException("Unknown running task ", job, ", ", node);

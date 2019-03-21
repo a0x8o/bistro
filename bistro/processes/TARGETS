@@ -1,5 +1,7 @@
 # @autodeps
 
+load("@fbcode_macros//build_defs:cpp_library.bzl", "cpp_library")
+
 cpp_library(
     name = "processes",
     srcs = [
@@ -39,7 +41,7 @@ cpp_library(
         "//folly/futures:core",
         "//folly/gen:file",
         "//folly/gen:string",
-        "//folly/io/async:async",
+        "//folly/io/async:async_base",
         "//thrift/lib/cpp2/protocol:protocol",
     ],
     external_deps = [
@@ -62,6 +64,7 @@ cpp_library(
         "//folly:subprocess",
         "//folly/futures:core",
         "//folly/gen:string",
-        "//folly/io/async:async",
+        "//folly/io/async:async_base",
+        "//folly/io/async:event_base_manager",
     ],
 )

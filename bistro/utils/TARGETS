@@ -1,10 +1,15 @@
 # @autodeps
 
+load("@fbcode_macros//build_defs:cpp_library.bzl", "cpp_library")
+
 cpp_library(
     name = "exception_lib",
     srcs = ["Exception.cpp"],
     headers = ["Exception.h"],
     deps = ["//folly:conv"],
+    external_deps = [
+        "glog",
+    ],
 )
 
 cpp_library(
@@ -12,8 +17,8 @@ cpp_library(
     srcs = ["hostname.cpp"],
     headers = ["hostname.h"],
     external_deps = [
-        "boost",
         "glog",  # Future: Move startsWithAny elsewhere.
+        ("boost", None, "boost_algorithm"),
     ],
 )
 
@@ -22,7 +27,9 @@ cpp_library(
     srcs = ["shell.cpp"],
     headers = ["shell.h"],
     deps = ["//folly:string"],
-    external_deps = ["boost"],
+    external_deps = [
+        ("boost", None, "boost_algorithm"),
+    ],
 )
 
 cpp_library(

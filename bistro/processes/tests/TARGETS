@@ -1,3 +1,5 @@
+load("@fbcode_macros//build_defs:cpp_unittest.bzl", "cpp_unittest")
+
 cpp_unittest(
     name = "test_async_read_pipe",
     srcs = ["test_async_read_pipe.cpp"],
@@ -6,13 +8,17 @@ cpp_unittest(
         "//folly:exception",
         "//folly:file",
         "//folly:random",
+        "//folly/io/async:async_base",
     ],
 )
 
 cpp_unittest(
     name = "test_async_read_pipe_rate_limiter",
     srcs = ["test_async_read_pipe_rate_limiter.cpp"],
-    deps = ["//bistro/bistro/processes:processes"],
+    deps = [
+        "//bistro/bistro/processes:processes",
+        "//folly/io/async:async_base",
+    ],
 )
 
 cpp_unittest(
@@ -22,7 +28,7 @@ cpp_unittest(
         "//bistro/bistro/processes:processes",
         "//folly:mpmc_queue",
         "//folly/experimental:auto_timer",
-        "//folly/io/async:async",
+        "//folly/io/async:async_base",
     ],
 )
 

@@ -1,5 +1,7 @@
 # @autodeps
 
+load("@fbcode_macros//build_defs:cpp_library.bzl", "cpp_library")
+
 cpp_library(
     name = "nodes_lib",
     srcs = [
@@ -38,5 +40,6 @@ cpp_library(
         "boost",
         "glog",
         ("boost", None, "boost_date_time"),
+        ("boost", None, "boost_range"),
     ],
 )
