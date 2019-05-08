@@ -222,6 +222,11 @@ class BuildCmd(SubCmd):
         install_dirs = []
 
         for m in projects:
+            ctx = dict(ctx)
+            if args.enable_tests and m.name == manifest.name:
+                ctx["test"] = "on"
+            else:
+                ctx["test"] = "off"
             fetcher = m.create_fetcher(opts, ctx)
 
             if args.clean:
@@ -245,6 +250,7 @@ class BuildCmd(SubCmd):
                         # Some kind of inconsistency with a prior build,
                         # let's run it again to be sure
                         os.unlink(built_marker)
+                        reconfigure = True
 
                 if sources_changed or reconfigure or not os.path.exists(built_marker):
                     if os.path.exists(built_marker):
@@ -286,6 +292,15 @@ class BuildCmd(SubCmd):
                 "slow up-to-date-ness checks"
             ),
         )
+        parser.add_argument(
+            "--enable-tests",
+            action="store_true",
+            default=False,
+            help=(
+                "For the named project, build tests so that the test command "
+                "is able to execute tests"
+            ),
+        )
 
 
 @cmd("test", "test a given project")
@@ -295,6 +310,7 @@ class TestCmd(SubCmd):
         manifest = load_project(opts, args.project)
 
         ctx = context_from_host_tuple()
+        ctx["test"] = "on"
         projects = manifests_in_dependency_order(opts, manifest, ctx)
         manifests_by_name = {m.name: m for m in projects}
 
