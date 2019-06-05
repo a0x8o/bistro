@@ -86,7 +86,7 @@ class BuilderBase(object):
 
         self._build(install_dirs=install_dirs, reconfigure=reconfigure)
 
-    def run_tests(self, install_dirs):
+    def run_tests(self, install_dirs, schedule_type):
         """ Execute any tests that we know how to run.  If they fail,
         raise an exception. """
         pass
@@ -183,7 +183,7 @@ class AutoconfBuilder(BuilderBase):
             # by the project on the basis that it may know more than plain
             # autoreconf does.
             if os.path.exists(autogen_path):
-                self._run_cmd([autogen_path], cwd=self.src_dir, env=env)
+                self._run_cmd(["bash", autogen_path], cwd=self.src_dir, env=env)
             else:
                 self._run_cmd(["autoreconf", "-ivf"], cwd=self.src_dir, env=env)
         configure_cmd = [configure_path, "--prefix=" + self.inst_dir] + self.args
@@ -279,7 +279,7 @@ class CMakeBuilder(BuilderBase):
             env=env,
         )
 
-    def run_tests(self, install_dirs):
+    def run_tests(self, install_dirs, schedule_type):
         env = self._compute_env(install_dirs)
         ctest = path_search(env, "ctest")
         cmake = path_search(env, "cmake")
@@ -329,21 +329,65 @@ class CMakeBuilder(BuilderBase):
 
             env.set("http_proxy", "")
             env.set("https_proxy", "")
-            self._run_cmd(
-                [
-                    testpilot,
-                    # Need to force the repo type otherwise testpilot on windows
-                    # can be confused (presumably sparse profile related)
-                    "--force-repo",
-                    "fbcode",
-                    "--force-repo-root",
-                    self.build_opts.fbsource_dir,
-                    "--buck-test-info",
-                    buck_test_info_name,
-                ],
-                cwd=self.build_opts.fbcode_builder_dir,
-                env=env,
-            )
+
+            runs = []
+
+            testpilot_args = [
+                testpilot,
+                # Need to force the repo type otherwise testpilot on windows
+                # can be confused (presumably sparse profile related)
+                "--force-repo",
+                "fbcode",
+                "--force-repo-root",
+                self.build_opts.fbsource_dir,
+                "--buck-test-info",
+                buck_test_info_name,
+            ]
+
+            if schedule_type == "continuous":
+                runs.append(
+                    [
+                        "--tag-new-tests",
+                        "--collection",
+                        "oss-continuous",
+                        "--purpose",
+                        "continuous",
+                    ]
+                )
+            elif schedule_type == "testwarden":
+                # One run to assess new tests
+                runs.append(
+                    [
+                        "--tag-new-tests",
+                        "--collection",
+                        "oss-new-test-stress",
+                        "--stress-runs",
+                        "10",
+                        "--purpose",
+                        "stress-run-new-test",
+                    ]
+                )
+                # And another for existing tests
+                runs.append(
+                    [
+                        "--tag-new-tests",
+                        "--collection",
+                        "oss-existing-test-stress",
+                        "--stress-runs",
+                        "10",
+                        "--purpose",
+                        "stress-run",
+                    ]
+                )
+            else:
+                runs.append(["--collection", "oss-diff", "--purpose", "diff"])
+
+            for run in runs:
+                self._run_cmd(
+                    testpilot_args + run,
+                    cwd=self.build_opts.fbcode_builder_dir,
+                    env=env,
+                )
         else:
             self._run_cmd(
                 [ctest, "--output-on-failure", "-j", str(self.build_opts.num_jobs)],
