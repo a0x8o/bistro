@@ -49,30 +49,13 @@ class BuilderBase(object):
             env = self.env
 
         if self.build_opts.is_windows():
-            # On Windows, the compiler is not available in the PATH by default
-            # so we need to run the vcvarsall script to populate the environment.
-            # We use a glob to find some version of this script as deployed with
-            # Visual Studio 2017.  This logic will need updating when we switch
-            # to a newer compiler.
-            vcvarsall = glob.glob(
-                os.path.join(
-                    os.environ["ProgramFiles(x86)"],
-                    "Microsoft Visual Studio",
-                    "2017",
-                    "*",
-                    "VC",
-                    "Auxiliary",
-                    "Build",
-                    "vcvarsall.bat",
-                )
-            )
-
-            if len(vcvarsall) > 0:
+            vcvarsall = self.build_opts.get_vcvars_path()
+            if vcvarsall is not None:
                 # Since it sets rather a large number of variables we mildly abuse
                 # the cmd quoting rules to assemble a command that calls the script
                 # to prep the environment and then triggers the actual command that
                 # we wanted to run.
-                cmd = [vcvarsall[0], "amd64", "&&"] + cmd
+                cmd = [vcvarsall, "amd64", "&&"] + cmd
 
         run_cmd(cmd=cmd, env=env, cwd=cwd or self.build_dir)
 
@@ -103,39 +86,7 @@ class BuilderBase(object):
     def _compute_env(self, install_dirs):
         # CMAKE_PREFIX_PATH is only respected when passed through the
         # environment, so we construct an appropriate path to pass down
-        env = self.env.copy()
-
-        lib_path = None
-        if self.build_opts.is_darwin():
-            lib_path = "DYLD_LIBRARY_PATH"
-        elif self.build_opts.is_linux():
-            lib_path = "LD_LIBRARY_PATH"
-        else:
-            lib_path = None
-
-        for d in install_dirs:
-            add_path_entry(env, "CMAKE_PREFIX_PATH", d)
-
-            pkgconfig = os.path.join(d, "lib/pkgconfig")
-            if os.path.exists(pkgconfig):
-                add_path_entry(env, "PKG_CONFIG_PATH", pkgconfig)
-
-            # Allow resolving shared objects built earlier (eg: zstd
-            # doesn't include the full path to the dylib in its linkage
-            # so we need to give it an assist)
-            if lib_path:
-                for lib in ["lib", "lib64"]:
-                    libdir = os.path.join(d, lib)
-                    if os.path.exists(libdir):
-                        add_path_entry(env, lib_path, libdir)
-
-            # Allow resolving binaries (eg: cmake, ninja) and dlls
-            # built by earlier steps
-            bindir = os.path.join(d, "bin")
-            if os.path.exists(bindir):
-                add_path_entry(env, "PATH", bindir, append=False)
-
-        return env
+        return self.build_opts.compute_env_for_install_dirs(install_dirs, env=self.env)
 
 
 class MakeBuilder(BuilderBase):
@@ -349,7 +300,14 @@ class CMakeBuilder(BuilderBase):
             output = subprocess.check_output(
                 [ctest, "--show-only=json-v1"], env=env, cwd=self.build_dir
             )
-            data = json.loads(output.decode("utf-8"))
+            try:
+                data = json.loads(output.decode("utf-8"))
+            except ValueError as exc:
+                raise Exception(
+                    "Failed to decode cmake test info using %s: %s.  Output was: %r"
+                    % (ctest, str(exc), output)
+                )
+
             tests = []
             machine_suffix = self.build_opts.host_type.as_tuple_string()
             for test in data["tests"]:

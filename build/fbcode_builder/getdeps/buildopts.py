@@ -9,13 +9,15 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import base64
 import errno
+import glob
 import hashlib
 import ntpath
 import os
 import subprocess
+import sys
 import tempfile
 
-from .envfuncs import path_search
+from .envfuncs import Env, add_path_entry, path_search
 from .platform import HostType, is_windows
 
 
@@ -41,6 +43,7 @@ class BuildOptions(object):
         install_dir=None,
         num_jobs=0,
         use_shipit=False,
+        vcvars_path=None,
     ):
         """ fbcode_builder_dir - the path to either the in-fbsource fbcode_builder dir,
                                  or for shipit-transformed repos, the build dir that
@@ -53,6 +56,7 @@ class BuildOptions(object):
             install_dir - where the project will ultimately be installed
             num_jobs - the level of concurrency to use while building
             use_shipit - use real shipit instead of the simple shipit transformer
+            vcvars_path - Path to external VS toolchain's vsvarsall.bat
         """
         if not num_jobs:
             import multiprocessing
@@ -83,12 +87,37 @@ class BuildOptions(object):
         self.fbcode_builder_dir = fbcode_builder_dir
         self.host_type = host_type
         self.use_shipit = use_shipit
+        if vcvars_path is None and is_windows():
+
+            # On Windows, the compiler is not available in the PATH by
+            # default so we need to run the vcvarsall script to populate the
+            # environment. We use a glob to find some version of this script
+            # as deployed with Visual Studio 2017.  This logic will need
+            # updating when we switch to a newer compiler.
+            vcvarsall = glob.glob(
+                os.path.join(
+                    os.environ["ProgramFiles(x86)"],
+                    "Microsoft Visual Studio",
+                    "2017",
+                    "*",
+                    "VC",
+                    "Auxiliary",
+                    "Build",
+                    "vcvarsall.bat",
+                )
+            )
+            vcvars_path = vcvarsall[0]
+
+        self.vcvars_path = vcvars_path
 
     def is_darwin(self):
         return self.host_type.is_darwin()
 
     def is_windows(self):
         return self.host_type.is_windows()
+
+    def get_vcvars_path(self):
+        return self.vcvars_path
 
     def is_linux(self):
         return self.host_type.is_linux()
@@ -161,6 +190,44 @@ class BuildOptions(object):
         inst_dir = os.path.join(self.install_dir, directory)
 
         return {"build_dir": build_dir, "inst_dir": inst_dir, "hash": hash}
+
+    def compute_env_for_install_dirs(self, install_dirs, env=None):
+        if env:
+            env = env.copy()
+        else:
+            env = Env()
+
+        lib_path = None
+        if self.is_darwin():
+            lib_path = "DYLD_LIBRARY_PATH"
+        elif self.is_linux():
+            lib_path = "LD_LIBRARY_PATH"
+        else:
+            lib_path = None
+
+        for d in install_dirs:
+            add_path_entry(env, "CMAKE_PREFIX_PATH", d)
+
+            pkgconfig = os.path.join(d, "lib/pkgconfig")
+            if os.path.exists(pkgconfig):
+                add_path_entry(env, "PKG_CONFIG_PATH", pkgconfig)
+
+            # Allow resolving shared objects built earlier (eg: zstd
+            # doesn't include the full path to the dylib in its linkage
+            # so we need to give it an assist)
+            if lib_path:
+                for lib in ["lib", "lib64"]:
+                    libdir = os.path.join(d, lib)
+                    if os.path.exists(libdir):
+                        add_path_entry(env, lib_path, libdir)
+
+            # Allow resolving binaries (eg: cmake, ninja) and dlls
+            # built by earlier steps
+            bindir = os.path.join(d, "bin")
+            if os.path.exists(bindir):
+                add_path_entry(env, "PATH", bindir, append=False)
+
+        return env
 
 
 def list_win32_subst_letters():
@@ -298,7 +365,9 @@ def setup_build_options(args, host_type=None):
 
         if is_windows():
             subst = create_subst_path(scratch_dir)
-            print("Mapping scratch dir %s -> %s" % (scratch_dir, subst))
+            print(
+                "Mapping scratch dir %s -> %s" % (scratch_dir, subst), file=sys.stderr
+            )
             scratch_dir = subst
 
     host_type = _check_host_type(args, host_type)
@@ -310,4 +379,5 @@ def setup_build_options(args, host_type=None):
         install_dir=args.install_prefix,
         num_jobs=args.num_jobs,
         use_shipit=args.use_shipit,
+        vcvars_path=args.vcvars_path,
     )
