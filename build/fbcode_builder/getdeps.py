@@ -18,9 +18,9 @@ import sys
 from getdeps.buildopts import setup_build_options
 from getdeps.dyndeps import create_dyn_dep_munger
 from getdeps.errors import TransientFailure
-from getdeps.load import load_project, manifests_in_dependency_order
+from getdeps.load import ManifestLoader
 from getdeps.manifest import ManifestParser
-from getdeps.platform import HostType, context_from_host_tuple
+from getdeps.platform import HostType
 from getdeps.subcmd import SubCmd, add_subcommands, cmd
 
 
@@ -84,14 +84,14 @@ class FetchCmd(SubCmd):
 
     def run(self, args):
         opts = setup_build_options(args)
-        manifest = load_project(opts, args.project)
-        ctx = context_from_host_tuple(args.host_type)
+        loader = ManifestLoader(opts)
+        manifest = loader.load_manifest(args.project)
         if args.recursive:
-            projects = manifests_in_dependency_order(opts, manifest, ctx)
+            projects = loader.manifests_in_dependency_order()
         else:
             projects = [manifest]
         for m in projects:
-            fetcher = m.create_fetcher(opts, ctx)
+            fetcher = loader.create_fetcher(m)
             fetcher.update()
 
 
@@ -99,9 +99,10 @@ class FetchCmd(SubCmd):
 class ListDepsCmd(SubCmd):
     def run(self, args):
         opts = setup_build_options(args)
-        manifest = load_project(opts, args.project)
-        ctx = context_from_host_tuple(args.host_type)
-        for m in manifests_in_dependency_order(opts, manifest, ctx):
+        loader = ManifestLoader(opts)
+        loader.ctx_gen.set_value_for_project(args.project, "test", "on")
+        loader.load_manifest(args.project)
+        for m in loader.manifests_in_dependency_order():
             print(m.name)
         return 0
 
@@ -141,10 +142,10 @@ class CleanCmd(SubCmd):
 class ShowInstDirCmd(SubCmd):
     def run(self, args):
         opts = setup_build_options(args)
-        manifest = load_project(opts, args.project)
-        ctx = context_from_host_tuple()
-        projects = manifests_in_dependency_order(opts, manifest, ctx)
-        manifests_by_name = {m.name: m for m in projects}
+        loader = ManifestLoader(opts)
+        loader.ctx_gen.set_value_for_project(args.project, "test", "on")
+        manifest = loader.load_manifest(args.project)
+        projects = loader.manifests_in_dependency_order()
 
         if args.recursive:
             manifests = projects
@@ -152,9 +153,7 @@ class ShowInstDirCmd(SubCmd):
             manifests = [manifest]
 
         for m in manifests:
-            fetcher = m.create_fetcher(opts, ctx)
-            dirs = opts.compute_dirs(m, fetcher, manifests_by_name, ctx)
-            inst_dir = dirs["inst_dir"]
+            inst_dir = loader.get_project_install_dir(m)
             print(inst_dir)
 
     def setup_parser(self, parser):
@@ -177,16 +176,17 @@ class ShowInstDirCmd(SubCmd):
 class ShowSourceDirCmd(SubCmd):
     def run(self, args):
         opts = setup_build_options(args)
-        manifest = load_project(opts, args.project)
-        ctx = context_from_host_tuple()
+        loader = ManifestLoader(opts)
+        loader.ctx_gen.set_value_for_project(args.project, "test", "on")
+        manifest = loader.load_manifest(args.project)
 
         if args.recursive:
-            manifests = manifests_in_dependency_order(opts, manifest, ctx)
+            manifests = loader.manifests_in_dependency_order()
         else:
             manifests = [manifest]
 
         for m in manifests:
-            fetcher = m.create_fetcher(opts, ctx)
+            fetcher = loader.create_fetcher(m)
             print(fetcher.get_src_dir())
 
     def setup_parser(self, parser):
@@ -209,34 +209,31 @@ class ShowSourceDirCmd(SubCmd):
 class BuildCmd(SubCmd):
     def run(self, args):
         opts = setup_build_options(args)
+        ctx_gen = opts.get_context_generator(facebook_internal=args.facebook_internal)
+        if args.enable_tests:
+            ctx_gen.set_value_for_project(args.project, "test", "on")
+        loader = ManifestLoader(opts, ctx_gen)
+
         if args.clean:
             clean_dirs(opts)
 
-        manifest = load_project(opts, args.project)
+        manifest = loader.load_manifest(args.project)
 
-        ctx = context_from_host_tuple(facebook_internal=args.facebook_internal)
-        print("Building on %s" % ctx)
-        projects = manifests_in_dependency_order(opts, manifest, ctx)
-        manifests_by_name = {m.name: m for m in projects}
+        print("Building on %s" % ctx_gen.get_context(args.project))
+        projects = loader.manifests_in_dependency_order()
 
         # Accumulate the install directories so that the build steps
         # can find their dep installation
         install_dirs = []
 
         for m in projects:
-            ctx = dict(ctx)
-            if args.enable_tests and m.name == manifest.name:
-                ctx["test"] = "on"
-            else:
-                ctx["test"] = "off"
-            fetcher = m.create_fetcher(opts, ctx)
+            fetcher = loader.create_fetcher(m)
 
             if args.clean:
                 fetcher.clean()
 
-            dirs = opts.compute_dirs(m, fetcher, manifests_by_name, ctx)
-            build_dir = dirs["build_dir"]
-            inst_dir = dirs["inst_dir"]
+            build_dir = loader.get_project_build_dir(m)
+            inst_dir = loader.get_project_install_dir(m)
 
             if m == manifest or not args.no_deps:
                 print("Assessing %s..." % m.name)
@@ -244,11 +241,12 @@ class BuildCmd(SubCmd):
                 reconfigure = change_status.build_changed()
                 sources_changed = change_status.sources_changed()
 
+                project_hash = loader.get_project_hash(m)
                 built_marker = os.path.join(inst_dir, ".built-by-getdeps")
                 if os.path.exists(built_marker):
                     with open(built_marker, "r") as f:
                         built_hash = f.read().strip()
-                    if built_hash != dirs["hash"]:
+                    if built_hash != project_hash:
                         # Some kind of inconsistency with a prior build,
                         # let's run it again to be sure
                         os.unlink(built_marker)
@@ -258,11 +256,12 @@ class BuildCmd(SubCmd):
                     if os.path.exists(built_marker):
                         os.unlink(built_marker)
                     src_dir = fetcher.get_src_dir()
+                    ctx = ctx_gen.get_context(m.name)
                     builder = m.create_builder(opts, src_dir, build_dir, inst_dir, ctx)
                     builder.build(install_dirs, reconfigure=reconfigure)
 
                     with open(built_marker, "w") as f:
-                        f.write(dirs["hash"])
+                        f.write(project_hash)
 
             install_dirs.append(inst_dir)
 
@@ -312,28 +311,21 @@ class BuildCmd(SubCmd):
 class FixupDeps(SubCmd):
     def run(self, args):
         opts = setup_build_options(args)
+        ctx_gen = opts.get_context_generator(facebook_internal=args.facebook_internal)
+        if args.enable_tests:
+            ctx_gen.set_value_for_project(args.project, "test", "on")
 
-        manifest = load_project(opts, args.project)
+        loader = ManifestLoader(opts, ctx_gen)
+        manifest = loader.load_manifest(args.project)
 
-        ctx = context_from_host_tuple(facebook_internal=args.facebook_internal)
-        projects = manifests_in_dependency_order(opts, manifest, ctx)
-        manifests_by_name = {m.name: m for m in projects}
+        projects = loader.manifests_in_dependency_order()
 
         # Accumulate the install directories so that the build steps
         # can find their dep installation
         install_dirs = []
 
         for m in projects:
-            ctx = dict(ctx)
-            if args.enable_tests and m.name == manifest.name:
-                ctx["test"] = "on"
-            else:
-                ctx["test"] = "off"
-            fetcher = m.create_fetcher(opts, ctx)
-
-            dirs = opts.compute_dirs(m, fetcher, manifests_by_name, ctx)
-            inst_dir = dirs["inst_dir"]
-
+            inst_dir = loader.get_project_install_dir(m)
             install_dirs.append(inst_dir)
 
             if m == manifest:
@@ -370,23 +362,22 @@ class FixupDeps(SubCmd):
 class TestCmd(SubCmd):
     def run(self, args):
         opts = setup_build_options(args)
-        manifest = load_project(opts, args.project)
+        ctx_gen = opts.get_context_generator(facebook_internal=args.facebook_internal)
+        if args.test_all:
+            ctx_gen.set_value_for_all_projects("test", "on")
+        else:
+            ctx_gen.set_value_for_project(args.project, "test", "on")
 
-        ctx = context_from_host_tuple(facebook_internal=args.facebook_internal)
-        ctx["test"] = "on"
-        projects = manifests_in_dependency_order(opts, manifest, ctx)
-        manifests_by_name = {m.name: m for m in projects}
+        loader = ManifestLoader(opts, ctx_gen)
+        manifest = loader.load_manifest(args.project)
+        projects = loader.manifests_in_dependency_order()
 
         # Accumulate the install directories so that the test steps
         # can find their dep installation
         install_dirs = []
 
         for m in projects:
-            fetcher = m.create_fetcher(opts, ctx)
-
-            dirs = opts.compute_dirs(m, fetcher, manifests_by_name, ctx)
-            build_dir = dirs["build_dir"]
-            inst_dir = dirs["inst_dir"]
+            inst_dir = loader.get_project_install_dir(m)
 
             if m == manifest or args.test_all:
                 built_marker = os.path.join(inst_dir, ".built-by-getdeps")
@@ -396,7 +387,10 @@ class TestCmd(SubCmd):
                     # want to tackle that as part of adding build-for-test
                     # support.
                     return 1
+                fetcher = loader.create_fetcher(m)
                 src_dir = fetcher.get_src_dir()
+                ctx = ctx_gen.get_context(m.name)
+                build_dir = loader.get_project_build_dir(m)
                 builder = m.create_builder(opts, src_dir, build_dir, inst_dir, ctx)
                 builder.run_tests(install_dirs, schedule_type=args.schedule_type)
 

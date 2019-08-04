@@ -1,11 +1,7 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
 #
-# Copyright (c) 2015, Facebook, Inc.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree. An additional grant
-# of patent rights can be found in the PATENTS file in the same directory.
-#
+# This source code is licensed under the MIT license found in the LICENSE
+# file in the root directory of this source tree.
 
 # Do NOT use this -- run cmake/run-cmake.sh instead & read its docblock.
 
@@ -19,13 +15,13 @@ include_directories(
 
 link_directories("${CMAKE_INSTALL_PREFIX}/lib")
 
-add_definitions(-std=c++14 -Wno-deprecated)
+# We generally need to track folly here, or the build may break.  E.g.
+# having `c++14` here became incompatible with folly built with `gnu++1z`.
+add_definitions(-std=gnu++1z -Wno-deprecated)
 
 set(
   BISTRO_LINK_DEPS
-  libcrypto.so
   libfolly.so
-  libfizz.so
   libfmt.so
   libglog.so
   libgflags.so
@@ -36,6 +32,9 @@ set(
   libboost_filesystem.so
   libdouble-conversion.so
   libproxygenhttpserver.so
+  libproxygen.so
+  libcrypto.so
+  libfizz.so
   libpthread.so
   libsqlite3.so
   libwangle.so
