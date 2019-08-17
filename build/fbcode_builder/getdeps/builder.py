@@ -203,12 +203,12 @@ import os
 import subprocess
 
 CMAKE = {cmake!r}
-CMAKE_ENV = {env!r}
-CMAKE_DEFINE_ARGS = {define_args!r}
 SRC_DIR = {src_dir!r}
 BUILD_DIR = {build_dir!r}
 INSTALL_DIR = {install_dir!r}
 CMD_PREFIX = {cmd_prefix!r}
+CMAKE_ENV = {env_str}
+CMAKE_DEFINE_ARGS = {define_args_str}
 
 
 def main():
@@ -220,9 +220,25 @@ def main():
       "directly to CMake."
     )
     ap.add_argument(
+      "--mode",
+      choices=["configure", "build", "install"],
+      default="configure",
+      help="The mode to run: configure, build, or install.  "
+      "Defaults to configure",
+    )
+    ap.add_argument(
       "--build",
-      action="store_true",
-      help="Run the build step rather than the configure step",
+      action="store_const",
+      const="build",
+      dest="mode",
+      help="An alias for --mode=build",
+    )
+    ap.add_argument(
+      "--install",
+      action="store_const",
+      const="install",
+      dest="mode",
+      help="An alias for --mode=install",
     )
     args = ap.parse_args()
 
@@ -232,18 +248,21 @@ def main():
 
     env = CMAKE_ENV
 
-    if args.build:
+    if args.mode == "configure":
+        full_cmd = CMD_PREFIX + [CMAKE, SRC_DIR] + CMAKE_DEFINE_ARGS + args.cmake_args
+    elif args.mode in ("build", "install"):
+        target = "all" if args.mode == "build" else "install"
         full_cmd = CMD_PREFIX + [
                 CMAKE,
                 "--build",
                 BUILD_DIR,
                 "--target",
-                "install",
+                target,
                 "--config",
                 "Release",
         ] + args.cmake_args
     else:
-        full_cmd = CMD_PREFIX + [CMAKE, SRC_DIR] + CMAKE_DEFINE_ARGS + args.cmake_args
+        ap.error("unknown invocation mode: %s" % (args.mode,))
 
     cmd_str = " ".join(full_cmd)
     print("Running: %r" % (cmd_str,))
@@ -278,6 +297,23 @@ if __name__ == "__main__":
         return False
 
     def _write_build_script(self, **kwargs):
+        env_lines = ["    {!r}: {!r},".format(k, v) for k, v in kwargs["env"].items()]
+        kwargs["env_str"] = "\n".join(["{"] + env_lines + ["}"])
+
+        define_arg_lines = ["["]
+        for arg in kwargs["define_args"]:
+            # Replace the CMAKE_INSTALL_PREFIX argument to use the INSTALL_DIR
+            # variable that we define in the MANUAL_BUILD_SCRIPT code.
+            if arg.startswith("-DCMAKE_INSTALL_PREFIX="):
+                value = "    {!r}.format(INSTALL_DIR),".format(
+                    "-DCMAKE_INSTALL_PREFIX={}"
+                )
+            else:
+                value = "    {!r},".format(arg)
+            define_arg_lines.append(value)
+        define_arg_lines.append("]")
+        kwargs["define_args_str"] = "\n".join(define_arg_lines)
+
         # In order to make it easier for developers to manually run builds for
         # CMake-based projects, write out some build scripts that can be used to invoke
         # CMake manually.

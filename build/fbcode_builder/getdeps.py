@@ -35,6 +35,10 @@ except ImportError:
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "getdeps"))
 
 
+class UsageError(Exception):
+    pass
+
+
 @cmd("validate-manifest", "parse a manifest and validate that it is correct")
 class ValidateManifest(SubCmd):
     def run(self, args):
@@ -58,8 +62,51 @@ class ShowHostType(SubCmd):
         return 0
 
 
-@cmd("fetch", "fetch the code for a given project")
-class FetchCmd(SubCmd):
+class ProjectCmdBase(SubCmd):
+    def run(self, args):
+        opts = setup_build_options(args)
+        ctx_gen = opts.get_context_generator(facebook_internal=args.facebook_internal)
+        if args.test_dependencies:
+            ctx_gen.set_value_for_all_projects("test", "on")
+        if args.enable_tests:
+            ctx_gen.set_value_for_project(args.project, "test", "on")
+        else:
+            ctx_gen.set_value_for_project(args.project, "test", "off")
+
+        loader = ManifestLoader(opts, ctx_gen)
+        self.process_project_dir_arguments(args, loader)
+
+        manifest = loader.load_manifest(args.project)
+
+        self.run_project_cmd(args, loader, manifest)
+
+    def process_project_dir_arguments(self, args, loader):
+        def parse_project_arg(arg, arg_type):
+            parts = arg.split(":")
+            if len(parts) == 2:
+                project, path = parts
+            elif len(parts) == 1:
+                project = args.project
+                path = parts[0]
+            else:
+                raise UsageError(
+                    "invalid %s argument; too many ':' characters: %s" % (arg_type, arg)
+                )
+
+            return project, os.path.abspath(path)
+
+        for arg in args.src_dir:
+            project, path = parse_project_arg(arg, "--src-dir")
+            loader.set_project_src_dir(project, path)
+
+        for arg in args.build_dir:
+            project, path = parse_project_arg(arg, "--build-dir")
+            loader.set_project_build_dir(project, path)
+
+        for arg in args.install_dir:
+            project, path = parse_project_arg(arg, "--install-dir")
+            loader.set_project_install_dir(project, path)
+
     def setup_parser(self, parser):
         parser.add_argument(
             "project",
@@ -68,6 +115,51 @@ class FetchCmd(SubCmd):
                 "file describing the project"
             ),
         )
+        parser.add_argument(
+            "--no-tests",
+            action="store_false",
+            dest="enable_tests",
+            default=True,
+            help="Disable building tests for this project.",
+        )
+        parser.add_argument(
+            "--test-dependencies",
+            action="store_true",
+            help="Enable building tests for dependencies as well.",
+        )
+        parser.add_argument(
+            "--src-dir",
+            default=[],
+            action="append",
+            help="Specify a local directory to use for the project source, "
+            "rather than fetching it.",
+        )
+        parser.add_argument(
+            "--build-dir",
+            default=[],
+            action="append",
+            help="Explicitly specify the build directory to use for the "
+            "project, instead of the default location in the scratch path. "
+            "This only affects the project specified, and not its dependencies.",
+        )
+        parser.add_argument(
+            "--install-dir",
+            default=[],
+            action="append",
+            help="Explicitly specify the install directory to use for the "
+            "project, instead of the default location in the scratch path. "
+            "This only affects the project specified, and not its dependencies.",
+        )
+
+        self.setup_project_cmd_parser(parser)
+
+    def setup_project_cmd_parser(self, parser):
+        pass
+
+
+@cmd("fetch", "fetch the code for a given project")
+class FetchCmd(ProjectCmdBase):
+    def setup_project_cmd_parser(self, parser):
         parser.add_argument(
             "--recursive",
             help="fetch the transitive deps also",
@@ -82,10 +174,7 @@ class FetchCmd(SubCmd):
             ),
         )
 
-    def run(self, args):
-        opts = setup_build_options(args)
-        loader = ManifestLoader(opts)
-        manifest = loader.load_manifest(args.project)
+    def run_project_cmd(self, args, loader, manifest):
         if args.recursive:
             projects = loader.manifests_in_dependency_order()
         else:
@@ -96,29 +185,18 @@ class FetchCmd(SubCmd):
 
 
 @cmd("list-deps", "lists the transitive deps for a given project")
-class ListDepsCmd(SubCmd):
-    def run(self, args):
-        opts = setup_build_options(args)
-        loader = ManifestLoader(opts)
-        loader.ctx_gen.set_value_for_project(args.project, "test", "on")
-        loader.load_manifest(args.project)
+class ListDepsCmd(ProjectCmdBase):
+    def run_project_cmd(self, args, loader, manifest):
         for m in loader.manifests_in_dependency_order():
             print(m.name)
         return 0
 
-    def setup_parser(self, parser):
+    def setup_project_cmd_parser(self, parser):
         parser.add_argument(
             "--host-type",
             help=(
                 "Produce the list for the specified host type, "
                 "rather than that of the current system"
-            ),
-        )
-        parser.add_argument(
-            "project",
-            help=(
-                "name of the project or path to a manifest "
-                "file describing the project"
             ),
         )
 
@@ -139,16 +217,10 @@ class CleanCmd(SubCmd):
 
 
 @cmd("show-inst-dir", "print the installation dir for a given project")
-class ShowInstDirCmd(SubCmd):
-    def run(self, args):
-        opts = setup_build_options(args)
-        loader = ManifestLoader(opts)
-        loader.ctx_gen.set_value_for_project(args.project, "test", "on")
-        manifest = loader.load_manifest(args.project)
-        projects = loader.manifests_in_dependency_order()
-
+class ShowInstDirCmd(ProjectCmdBase):
+    def run_project_cmd(self, args, loader, manifest):
         if args.recursive:
-            manifests = projects
+            manifests = loader.manifests_in_dependency_order()
         else:
             manifests = [manifest]
 
@@ -156,14 +228,7 @@ class ShowInstDirCmd(SubCmd):
             inst_dir = loader.get_project_install_dir(m)
             print(inst_dir)
 
-    def setup_parser(self, parser):
-        parser.add_argument(
-            "project",
-            help=(
-                "name of the project or path to a manifest "
-                "file describing the project"
-            ),
-        )
+    def setup_project_cmd_parser(self, parser):
         parser.add_argument(
             "--recursive",
             help="print the transitive deps also",
@@ -173,13 +238,8 @@ class ShowInstDirCmd(SubCmd):
 
 
 @cmd("show-source-dir", "print the source dir for a given project")
-class ShowSourceDirCmd(SubCmd):
-    def run(self, args):
-        opts = setup_build_options(args)
-        loader = ManifestLoader(opts)
-        loader.ctx_gen.set_value_for_project(args.project, "test", "on")
-        manifest = loader.load_manifest(args.project)
-
+class ShowSourceDirCmd(ProjectCmdBase):
+    def run_project_cmd(self, args, loader, manifest):
         if args.recursive:
             manifests = loader.manifests_in_dependency_order()
         else:
@@ -189,14 +249,7 @@ class ShowSourceDirCmd(SubCmd):
             fetcher = loader.create_fetcher(m)
             print(fetcher.get_src_dir())
 
-    def setup_parser(self, parser):
-        parser.add_argument(
-            "project",
-            help=(
-                "name of the project or path to a manifest "
-                "file describing the project"
-            ),
-        )
+    def setup_project_cmd_parser(self, parser):
         parser.add_argument(
             "--recursive",
             help="print the transitive deps also",
@@ -206,20 +259,12 @@ class ShowSourceDirCmd(SubCmd):
 
 
 @cmd("build", "build a given project")
-class BuildCmd(SubCmd):
-    def run(self, args):
-        opts = setup_build_options(args)
-        ctx_gen = opts.get_context_generator(facebook_internal=args.facebook_internal)
-        if args.enable_tests:
-            ctx_gen.set_value_for_project(args.project, "test", "on")
-        loader = ManifestLoader(opts, ctx_gen)
-
+class BuildCmd(ProjectCmdBase):
+    def run_project_cmd(self, args, loader, manifest):
         if args.clean:
-            clean_dirs(opts)
+            clean_dirs(loader.build_opts)
 
-        manifest = loader.load_manifest(args.project)
-
-        print("Building on %s" % ctx_gen.get_context(args.project))
+        print("Building on %s" % loader.ctx_gen.get_context(args.project))
         projects = loader.manifests_in_dependency_order()
 
         # Accumulate the install directories so that the build steps
@@ -256,8 +301,10 @@ class BuildCmd(SubCmd):
                     if os.path.exists(built_marker):
                         os.unlink(built_marker)
                     src_dir = fetcher.get_src_dir()
-                    ctx = ctx_gen.get_context(m.name)
-                    builder = m.create_builder(opts, src_dir, build_dir, inst_dir, ctx)
+                    ctx = loader.ctx_gen.get_context(m.name)
+                    builder = m.create_builder(
+                        loader.build_opts, src_dir, build_dir, inst_dir, ctx
+                    )
                     builder.build(install_dirs, reconfigure=reconfigure)
 
                     with open(built_marker, "w") as f:
@@ -265,14 +312,7 @@ class BuildCmd(SubCmd):
 
             install_dirs.append(inst_dir)
 
-    def setup_parser(self, parser):
-        parser.add_argument(
-            "project",
-            help=(
-                "name of the project or path to a manifest "
-                "file describing the project"
-            ),
-        )
+    def setup_project_cmd_parser(self, parser):
         parser.add_argument(
             "--clean",
             action="store_true",
@@ -293,31 +333,11 @@ class BuildCmd(SubCmd):
                 "slow up-to-date-ness checks"
             ),
         )
-        parser.add_argument(
-            "--enable-tests",
-            action="store_true",
-            default=False,
-            help=(
-                "For the named project, build tests so that the test command "
-                "is able to execute tests"
-            ),
-        )
-        parser.add_argument(
-            "--schedule-type", help="Indicates how the build was activated"
-        )
 
 
 @cmd("fixup-dyn-deps", "Adjusts dynamic dependencies for packaging purposes")
-class FixupDeps(SubCmd):
-    def run(self, args):
-        opts = setup_build_options(args)
-        ctx_gen = opts.get_context_generator(facebook_internal=args.facebook_internal)
-        if args.enable_tests:
-            ctx_gen.set_value_for_project(args.project, "test", "on")
-
-        loader = ManifestLoader(opts, ctx_gen)
-        manifest = loader.load_manifest(args.project)
-
+class FixupDeps(ProjectCmdBase):
+    def run_project_cmd(self, args, loader, manifest):
         projects = loader.manifests_in_dependency_order()
 
         # Accumulate the install directories so that the build steps
@@ -329,47 +349,19 @@ class FixupDeps(SubCmd):
             install_dirs.append(inst_dir)
 
             if m == manifest:
-                dep_munger = create_dyn_dep_munger(opts, install_dirs)
+                dep_munger = create_dyn_dep_munger(loader.build_opts, install_dirs)
                 dep_munger.process_deps(args.destdir, args.final_install_prefix)
 
-    def setup_parser(self, parser):
-        parser.add_argument(
-            "project",
-            help=(
-                "name of the project or path to a manifest "
-                "file describing the project"
-            ),
-        )
+    def setup_project_cmd_parser(self, parser):
         parser.add_argument("destdir", help=("Where to copy the fixed up executables"))
         parser.add_argument(
             "--final-install-prefix", help=("specify the final installation prefix")
         )
-        parser.add_argument(
-            "--enable-tests",
-            action="store_true",
-            default=False,
-            help=(
-                "For the named project, build tests so that the test command "
-                "is able to execute tests"
-            ),
-        )
-        parser.add_argument(
-            "--schedule-type", help="Indicates how the build was activated"
-        )
 
 
 @cmd("test", "test a given project")
-class TestCmd(SubCmd):
-    def run(self, args):
-        opts = setup_build_options(args)
-        ctx_gen = opts.get_context_generator(facebook_internal=args.facebook_internal)
-        if args.test_all:
-            ctx_gen.set_value_for_all_projects("test", "on")
-        else:
-            ctx_gen.set_value_for_project(args.project, "test", "on")
-
-        loader = ManifestLoader(opts, ctx_gen)
-        manifest = loader.load_manifest(args.project)
+class TestCmd(ProjectCmdBase):
+    def run_project_cmd(self, args, loader, manifest):
         projects = loader.manifests_in_dependency_order()
 
         # Accumulate the install directories so that the test steps
@@ -379,7 +371,7 @@ class TestCmd(SubCmd):
         for m in projects:
             inst_dir = loader.get_project_install_dir(m)
 
-            if m == manifest or args.test_all:
+            if m == manifest or args.test_dependencies:
                 built_marker = os.path.join(inst_dir, ".built-by-getdeps")
                 if not os.path.exists(built_marker):
                     print("project %s has not been built" % m.name)
@@ -389,27 +381,16 @@ class TestCmd(SubCmd):
                     return 1
                 fetcher = loader.create_fetcher(m)
                 src_dir = fetcher.get_src_dir()
-                ctx = ctx_gen.get_context(m.name)
+                ctx = loader.ctx_gen.get_context(m.name)
                 build_dir = loader.get_project_build_dir(m)
-                builder = m.create_builder(opts, src_dir, build_dir, inst_dir, ctx)
+                builder = m.create_builder(
+                    loader.build_opts, src_dir, build_dir, inst_dir, ctx
+                )
                 builder.run_tests(install_dirs, schedule_type=args.schedule_type)
 
             install_dirs.append(inst_dir)
 
-    def setup_parser(self, parser):
-        parser.add_argument(
-            "project",
-            help=(
-                "name of the project or path to a manifest "
-                "file describing the project"
-            ),
-        )
-        parser.add_argument(
-            "--test-all",
-            action="store_true",
-            default=False,
-            help="Enable running tests for the named project and all of its deps",
-        )
+    def setup_project_cmd_parser(self, parser):
         parser.add_argument(
             "--schedule-type", help="Indicates how the build was activated"
         )
@@ -503,6 +484,9 @@ def main():
         return 0
     try:
         return args.func(args)
+    except UsageError as exc:
+        ap.error(str(exc))
+        return 1
     except TransientFailure as exc:
         print("TransientFailure: %s" % str(exc))
         # This return code is treated as a retryable transient infrastructure
