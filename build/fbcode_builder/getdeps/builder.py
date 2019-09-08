@@ -75,7 +75,7 @@ class BuilderBase(object):
 
         self._build(install_dirs=install_dirs, reconfigure=reconfigure)
 
-    def run_tests(self, install_dirs, schedule_type):
+    def run_tests(self, install_dirs, schedule_type, owner):
         """ Execute any tests that we know how to run.  If they fail,
         raise an exception. """
         pass
@@ -200,7 +200,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 import argparse
 import os
-import subprocess
 
 CMAKE = {cmake!r}
 SRC_DIR = {src_dir!r}
@@ -266,7 +265,8 @@ def main():
 
     cmd_str = " ".join(full_cmd)
     print("Running: %r" % (cmd_str,))
-    subprocess.call(full_cmd, env=env, cwd=BUILD_DIR)
+    os.chdir(BUILD_DIR)
+    os.execve(CMAKE, full_cmd, env)
 
 
 if __name__ == "__main__":
@@ -408,7 +408,7 @@ if __name__ == "__main__":
             env=env,
         )
 
-    def run_tests(self, install_dirs, schedule_type):
+    def run_tests(self, install_dirs, schedule_type, owner):
         env = self._compute_env(install_dirs)
         ctest = path_search(env, "ctest")
         cmake = path_search(env, "cmake")
@@ -483,6 +483,9 @@ if __name__ == "__main__":
                 "platform=%s" % machine_suffix,
                 "buildsystem=getdeps",
             ]
+
+            if owner:
+                testpilot_args += ["--contacts", owner]
 
             if schedule_type == "continuous":
                 runs.append(
@@ -600,7 +603,9 @@ class OpenSSLBuilder(BuilderBase):
 
 
 class Boost(BuilderBase):
-    def __init__(self, build_opts, ctx, manifest, src_dir, build_dir, inst_dir):
+    def __init__(
+        self, build_opts, ctx, manifest, src_dir, build_dir, inst_dir, b2_args
+    ):
         children = os.listdir(src_dir)
         assert len(children) == 1, "expected a single directory entry: %r" % (children,)
         boost_src = children[0]
@@ -609,6 +614,7 @@ class Boost(BuilderBase):
         super(Boost, self).__init__(
             build_opts, ctx, manifest, src_dir, build_dir, inst_dir
         )
+        self.b2_args = b2_args
 
     def _build(self, install_dirs, reconfigure):
         linkage = ["static"]
@@ -635,6 +641,7 @@ class Boost(BuilderBase):
                     "--builddir=%s" % self.build_dir,
                 ]
                 + args
+                + self.b2_args
                 + [
                     "link=%s" % link,
                     "runtime-link=shared",
