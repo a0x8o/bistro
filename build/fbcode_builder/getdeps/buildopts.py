@@ -35,8 +35,26 @@ def containing_repo_type(path):
 
         parent = os.path.dirname(path)
         if parent == path:
-            return None
+            return None, None
         path = parent
+
+
+def detect_project(path):
+    repo_type, repo_root = containing_repo_type(path)
+    if repo_type is None:
+        return None, None
+
+    # Look for a .projectid file.  If it exists, read the project name from it.
+    project_id_path = os.path.join(repo_root, ".projectid")
+    try:
+        with open(project_id_path, "r") as f:
+            project_name = f.read().strip()
+            return repo_root, project_name
+    except EnvironmentError as ex:
+        if ex.errno != errno.ENOENT:
+            raise
+
+    return repo_root, None
 
 
 class BuildOptions(object):
@@ -78,11 +96,13 @@ class BuildOptions(object):
                 self.project_hashes = hashes
                 break
 
-        # Use a simplistic heuristic to figure out if we're in fbsource
-        # and where the root of fbsource can be found
-        repo_type, repo_root = containing_repo_type(fbcode_builder_dir)
-        if repo_type == "hg":
-            self.fbsource_dir = repo_root
+        # Detect what repository and project we are being run from.
+        self.repo_root, self.repo_project = detect_project(os.getcwd())
+
+        # If we are running from an fbsource repository, set self.fbsource_dir
+        # to allow the ShipIt-based fetchers to use it.
+        if self.repo_project == "fbsource":
+            self.fbsource_dir = self.repo_root
         else:
             self.fbsource_dir = None
 
@@ -97,23 +117,32 @@ class BuildOptions(object):
             # On Windows, the compiler is not available in the PATH by
             # default so we need to run the vcvarsall script to populate the
             # environment. We use a glob to find some version of this script
-            # as deployed with Visual Studio 2017.  This logic will need
-            # updating when we switch to a newer compiler.
-            vcvarsall = glob.glob(
-                os.path.join(
-                    os.environ["ProgramFiles(x86)"],
-                    "Microsoft Visual Studio",
-                    "2017",
-                    "*",
-                    "VC",
-                    "Auxiliary",
-                    "Build",
-                    "vcvarsall.bat",
+            # as deployed with Visual Studio 2017.  This logic can also
+            # locate Visual Studio 2019 but note that at the time of writing
+            # the version of boost in our manifest cannot be built with
+            # VS 2019, so we're effectively tied to VS 2017 until we upgrade
+            # the boost dependency.
+            vcvarsall = []
+            for year in ["2017", "2019"]:
+                vcvarsall += glob.glob(
+                    os.path.join(
+                        os.environ["ProgramFiles(x86)"],
+                        "Microsoft Visual Studio",
+                        year,
+                        "*",
+                        "VC",
+                        "Auxiliary",
+                        "Build",
+                        "vcvarsall.bat",
+                    )
                 )
-            )
             vcvars_path = vcvarsall[0]
 
         self.vcvars_path = vcvars_path
+
+    @property
+    def manifests_dir(self):
+        return os.path.join(self.fbcode_builder_dir, "manifests")
 
     def is_darwin(self):
         return self.host_type.is_darwin()
@@ -164,6 +193,10 @@ class BuildOptions(object):
             add_path_entry(env, "CMAKE_PREFIX_PATH", d)
 
             pkgconfig = os.path.join(d, "lib/pkgconfig")
+            if os.path.exists(pkgconfig):
+                add_path_entry(env, "PKG_CONFIG_PATH", pkgconfig)
+
+            pkgconfig = os.path.join(d, "lib64/pkgconfig")
             if os.path.exists(pkgconfig):
                 add_path_entry(env, "PKG_CONFIG_PATH", pkgconfig)
 
