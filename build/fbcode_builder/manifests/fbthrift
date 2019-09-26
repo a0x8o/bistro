@@ -11,17 +11,17 @@ repo_url = https://github.com/facebook/fbthrift.git
 builder = cmake
 
 [dependencies]
+bison
+flex
 folly
 wangle
 rsocket-cpp
 fizz
 fmt
-libsodium
 googletest
+libsodium
+python-six
 zstd
-
-[dependencies.any(os=windows, os=darwin)]
-bison
 
 [cmake.defines.test=on]
 BUILD_TESTS=ON

@@ -71,6 +71,23 @@ class ShowHostType(SubCmd):
 class ProjectCmdBase(SubCmd):
     def run(self, args):
         opts = setup_build_options(args)
+
+        if args.current_project is not None:
+            opts.repo_project = args.current_project
+        if args.project is None:
+            if opts.repo_project is None:
+                raise UsageError(
+                    "no project name specified, and no .projectid file found"
+                )
+            if opts.repo_project == "fbsource":
+                # The fbsource repository is a little special.  There is no project
+                # manifest file for it.  A specific project must always be explicitly
+                # specified when building from fbsource.
+                raise UsageError(
+                    "no project name specified (required when building in fbsource)"
+                )
+            args.project = opts.repo_project
+
         ctx_gen = opts.get_context_generator(facebook_internal=args.facebook_internal)
         if args.test_dependencies:
             ctx_gen.set_value_for_all_projects("test", "on")
@@ -101,6 +118,12 @@ class ProjectCmdBase(SubCmd):
 
             return project, os.path.abspath(path)
 
+        # If we are currently running from a project repository,
+        # use the current repository for the project sources.
+        build_opts = loader.build_opts
+        if build_opts.repo_project is not None and build_opts.repo_root is not None:
+            loader.set_project_src_dir(build_opts.repo_project, build_opts.repo_root)
+
         for arg in args.src_dir:
             project, path = parse_project_arg(arg, "--src-dir")
             loader.set_project_src_dir(project, path)
@@ -116,6 +139,7 @@ class ProjectCmdBase(SubCmd):
     def setup_parser(self, parser):
         parser.add_argument(
             "project",
+            nargs="?",
             help=(
                 "name of the project or path to a manifest "
                 "file describing the project"
@@ -132,6 +156,12 @@ class ProjectCmdBase(SubCmd):
             "--test-dependencies",
             action="store_true",
             help="Enable building tests for dependencies as well.",
+        )
+        parser.add_argument(
+            "--current-project",
+            help="Specify the name of the fbcode_builder manifest file for the "
+            "current repository.  If not specified, the code will attempt to find "
+            "this in a .projectid file in the repository root.",
         )
         parser.add_argument(
             "--src-dir",
@@ -188,7 +218,7 @@ class CachedProject(object):
 
     def is_cacheable(self):
         """ We only cache third party projects """
-        return self.cache and not self.m.shipit_fbcode_builder
+        return self.cache and self.m.shipit_project is None
 
     def download(self):
         if self.is_cacheable() and not os.path.exists(self.inst_dir):
@@ -211,7 +241,7 @@ class CachedProject(object):
         return False
 
     def upload(self):
-        if self.cache and not self.m.shipit_fbcode_builder:
+        if self.is_cacheable():
             # We can prepare an archive and stick it in LFS
             tempdir = tempfile.mkdtemp()
             tarfilename = os.path.join(tempdir, self.cache_file_name)
@@ -356,7 +386,7 @@ class BuildCmd(ProjectCmdBase):
         print("Building on %s" % loader.ctx_gen.get_context(args.project))
         projects = loader.manifests_in_dependency_order()
 
-        cache = cache_module.create_cache()
+        cache = cache_module.create_cache() if args.use_build_cache else None
 
         # Accumulate the install directories so that the build steps
         # can find their dep installation
@@ -457,6 +487,13 @@ class BuildCmd(ProjectCmdBase):
             ),
         )
         parser.add_argument(
+            "--no-build-cache",
+            action="store_false",
+            default=True,
+            dest="use_build_cache",
+            help="Do not attempt to use the build cache.",
+        )
+        parser.add_argument(
             "--schedule-type", help="Indicates how the build was activated"
         )
 
@@ -525,6 +562,108 @@ class TestCmd(ProjectCmdBase):
             "--schedule-type", help="Indicates how the build was activated"
         )
         parser.add_argument("--test-owner", help="Owner for testpilot")
+
+
+@cmd("generate-github-actions", "generate a GitHub actions configuration")
+class GenerateGitHubActionsCmd(ProjectCmdBase):
+    def run_project_cmd(self, args, loader, manifest):
+        platforms = [
+            HostType("linux", "ubuntu", "18"),
+            HostType("darwin", None, None),
+            HostType("windows", None, None),
+        ]
+
+        with open(args.output_file, "w") as out:
+            # Deliberate line break here because the @ and the generated
+            # symbols are meaningful to our internal tooling when they
+            # appear in a single token
+            out.write("# This file was @")
+            out.write("generated by getdeps.py\n")
+            out.write(
+                """
+name: CI
+
+on:
+  push:
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+
+jobs:
+"""
+            )
+            for p in platforms:
+                build_opts = setup_build_options(args, p)
+                self.write_job_for_platform(out, args, build_opts)
+
+    def write_job_for_platform(self, out, args, build_opts):
+        ctx_gen = build_opts.get_context_generator()
+        loader = ManifestLoader(build_opts, ctx_gen)
+        manifest = loader.load_manifest(args.project)
+        manifest_ctx = loader.ctx_gen.get_context(manifest.name)
+
+        # Some projects don't do anything "useful" as a leaf project, only
+        # as a dep for a leaf project.  Check for those here; we don't want
+        # to waste the effort scheduling them on CI.
+        # We do this by looking at the builder type in the manifest file
+        # rather than creating a builder and checking its type because we
+        # don't know enough to create the full builder instance here.
+        if manifest.get("build", "builder", ctx=manifest_ctx) == "nop":
+            return None
+
+        if build_opts.is_linux():
+            job_name = "linux"
+            runs_on = "ubuntu-18.04"
+        elif build_opts.is_windows():
+            # We're targeting the windows-2016 image because it has
+            # Visual Studio 2017 installed, and at the time of writing,
+            # the version of boost in the manifests (1.69) is not
+            # buildable with Visual Studio 2019
+            job_name = "windows"
+            runs_on = "windows-2016"
+        else:
+            job_name = "mac"
+            runs_on = "macOS-latest"
+
+        out.write("  %s:\n" % job_name)
+        out.write("    runs-on: %s\n" % runs_on)
+        out.write("    steps:\n")
+        out.write("    - uses: actions/checkout@v1\n")
+
+        projects = loader.manifests_in_dependency_order()
+
+        for m in projects:
+            if m != manifest:
+                out.write("    - name: Fetch %s\n" % m.name)
+                out.write(
+                    "      run: python build/fbcode_builder/getdeps.py fetch "
+                    "--no-tests %s\n" % m.name
+                )
+
+        for m in projects:
+            if m != manifest:
+                out.write("    - name: Build %s\n" % m.name)
+                out.write(
+                    "      run: python build/fbcode_builder/getdeps.py build "
+                    "--no-tests %s\n" % m.name
+                )
+
+        out.write("    - name: Build %s\n" % manifest.name)
+        out.write(
+            "      run: python build/fbcode_builder/getdeps.py build --src-dir=. %s\n"
+            % manifest.name
+        )
+
+        out.write("    - name: Test %s\n" % manifest.name)
+        out.write(
+            "      run: python build/fbcode_builder/getdeps.py test --src-dir=. %s\n"
+            % manifest.name
+        )
+
+    def setup_project_cmd_parser(self, parser):
+        parser.add_argument("--output-file", help="The name of the yaml file")
 
 
 def get_arg_var_name(args):

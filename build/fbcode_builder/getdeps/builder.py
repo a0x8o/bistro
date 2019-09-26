@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 # Copyright (c) 2019-present, Facebook, Inc.
 # All rights reserved.
 #
@@ -103,11 +102,19 @@ class MakeBuilder(BuilderBase):
         self.args = args or []
 
     def _build(self, install_dirs, reconfigure):
-        cmd = ["make", "-j%s" % self.build_opts.num_jobs] + self.args
-        self._run_cmd(cmd)
+        env = self._compute_env(install_dirs)
 
-        install_cmd = ["make", "install", "PREFIX=" + self.inst_dir]
-        self._run_cmd(install_cmd)
+        # Need to ensure that PREFIX is set prior to install because
+        # libbpf uses it when generating its pkg-config file
+        cmd = (
+            ["make", "-j%s" % self.build_opts.num_jobs]
+            + self.args
+            + ["PREFIX=" + self.inst_dir]
+        )
+        self._run_cmd(cmd, env=env)
+
+        install_cmd = ["make", "install"] + self.args + ["PREFIX=" + self.inst_dir]
+        self._run_cmd(install_cmd, env=env)
 
 
 class AutoconfBuilder(BuilderBase):
@@ -121,11 +128,7 @@ class AutoconfBuilder(BuilderBase):
         configure_path = os.path.join(self.src_dir, "configure")
         autogen_path = os.path.join(self.src_dir, "autogen.sh")
 
-        env = self.env.copy()
-        for d in install_dirs:
-            add_path_entry(env, "PKG_CONFIG_PATH", "%s/lib/pkgconfig" % d)
-            bindir = os.path.join(d, "bin")
-            add_path_entry(env, "PATH", bindir, append=False)
+        env = self._compute_env(install_dirs)
 
         if not os.path.exists(configure_path):
             print("%s doesn't exist, so reconfiguring" % configure_path)
@@ -199,7 +202,8 @@ class CMakeBuilder(BuilderBase):
 from __future__ import absolute_import, division, print_function, unicode_literals
 
 import argparse
-import os
+import subprocess
+import sys
 
 CMAKE = {cmake!r}
 SRC_DIR = {src_dir!r}
@@ -265,8 +269,8 @@ def main():
 
     cmd_str = " ".join(full_cmd)
     print("Running: %r" % (cmd_str,))
-    os.chdir(BUILD_DIR)
-    os.execve(CMAKE, full_cmd, env)
+    proc = subprocess.run(full_cmd, env=env, cwd=BUILD_DIR)
+    sys.exit(proc.returncode)
 
 
 if __name__ == "__main__":
@@ -340,6 +344,16 @@ if __name__ == "__main__":
             ccache = path_search(env, "ccache")
             if ccache:
                 defines["CMAKE_CXX_COMPILER_LAUNCHER"] = ccache
+
+        if "GITHUB_ACTIONS" in os.environ and self.build_opts.is_windows():
+            # GitHub actions: the host has both gcc and msvc installed, and
+            # the default behavior of cmake is to prefer gcc.
+            # Instruct cmake that we want it to use cl.exe; this is important
+            # because Boost prefers cl.exe and the mismatch results in cmake
+            # with gcc not being able to find boost built with cl.exe.
+            defines["CMAKE_C_COMPILER"] = "cl.exe"
+            defines["CMAKE_CXX_COMPILER"] = "cl.exe"
+
         if self.build_opts.is_darwin():
             # Try to persuade cmake to set the rpath to match the lib
             # dirs of the dependencies.  This isn't automatic, and to
