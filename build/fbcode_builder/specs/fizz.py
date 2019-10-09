@@ -13,7 +13,9 @@ def fbcode_builder_spec(builder):
     builder.add_option(
         'fizz/fizz/build:cmake_defines',
         {
-            'BUILD_SHARED_LIBS': 'OFF',
+            # Fizz's build is kind of broken, in the sense that both `mvfst`
+            # and `proxygen` depend on files that are only installed with
+            # `BUILD_TESTS` enabled, e.g. `fizz/crypto/test/TestUtil.h`.
             'BUILD_TESTS': 'ON',
         }
     )
