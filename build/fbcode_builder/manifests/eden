@@ -18,9 +18,11 @@ fb303
 cpptoml
 rocksdb
 libgit2
-fb-mercurial
-fb-mercurial-rust
+lz4
 python-toml
+
+[dependencies.fb=on]
+rust
 
 # macOS ships with sqlite3, and some of the core system
 # frameworks require that that version be linked rather
@@ -41,7 +43,11 @@ libcurl
 [shipit.pathmap]
 fbcode/eden/oss = .
 fbcode/eden = eden
+fbcode/tools/lfs = tools/lfs
 
 [shipit.strip]
 ^fbcode/eden/fs/eden-config\.h$
 ^fbcode/eden/hg/.*$
+
+[cmake.defines.all(fb=on,os=windows)]
+INSTALL_PYTHON_LIB=ON
