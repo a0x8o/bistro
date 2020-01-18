@@ -154,7 +154,7 @@ class BuildOptions(object):
     def is_linux(self):
         return self.host_type.is_linux()
 
-    def get_context_generator(self, host_tuple=None, facebook_internal=False):
+    def get_context_generator(self, host_tuple=None, facebook_internal=None):
         """ Create a manifest ContextGenerator for the specified target platform. """
         if host_tuple is None:
             host_type = self.host_type
@@ -162,6 +162,12 @@ class BuildOptions(object):
             host_type = host_tuple
         else:
             host_type = HostType.from_tuple_string(host_tuple)
+
+        # facebook_internal is an Optional[bool]
+        # If it is None, default to assuming this is a Facebook-internal build if
+        # we are running in an fbsource repository.
+        if facebook_internal is None:
+            facebook_internal = self.fbsource_dir is not None
 
         return ContextGenerator(
             {
@@ -227,6 +233,19 @@ class BuildOptions(object):
             bindir = os.path.join(d, "bin")
             if os.path.exists(bindir):
                 add_path_entry(env, "PATH", bindir, append=False)
+
+            # If rustc is present in the `bin` directory, set RUSTC to prevent
+            # cargo uses the rustc installed in the system.
+            if self.is_windows():
+                rustc_path = os.path.join(bindir, "rustc.bat")
+                rustdoc_path = os.path.join(bindir, "rustdoc.bat")
+            else:
+                rustc_path = os.path.join(bindir, "rustc")
+                rustdoc_path = os.path.join(bindir, "rustdoc")
+
+            if os.path.isfile(rustc_path):
+                env["RUSTC"] = rustc_path
+                env["RUSTDOC"] = rustdoc_path
 
         return env
 

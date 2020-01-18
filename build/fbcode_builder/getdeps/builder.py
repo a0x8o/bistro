@@ -5,7 +5,6 @@
 
 from __future__ import absolute_import, division, print_function, unicode_literals
 
-import glob
 import json
 import os
 import shutil
@@ -60,7 +59,8 @@ class BuilderBase(object):
         if cmd_prefix:
             cmd = cmd_prefix + cmd
 
-        run_cmd(cmd=cmd, env=env, cwd=cwd or self.build_dir)
+        log_file = os.path.join(self.build_dir, "getdeps_build.log")
+        run_cmd(cmd=cmd, env=env, cwd=cwd or self.build_dir, log_file=log_file)
 
     def build(self, install_dirs, reconfigure):
         print("Building %s..." % self.manifest.name)
@@ -724,6 +724,26 @@ class NopBuilder(BuilderBase):
                 shutil.copytree(self.src_dir, self.inst_dir)
 
 
+class OpenNSABuilder(NopBuilder):
+    # OpenNSA libraries are stored with git LFS. As a result, fetcher fetches
+    # LFS pointers and not the contents. Use git-lfs to pull the real contents
+    # before copying to install dir using NoopBuilder.
+    # In future, if more builders require git-lfs, we would consider installing
+    # git-lfs as part of the sandcastle infra as against repeating similar
+    # logic for each builder that requires git-lfs.
+    def __init__(self, build_opts, ctx, manifest, src_dir, inst_dir):
+        super(OpenNSABuilder, self).__init__(
+            build_opts, ctx, manifest, src_dir, inst_dir
+        )
+
+    def build(self, install_dirs, reconfigure):
+        env = self._compute_env(install_dirs)
+        self._run_cmd(["git", "lfs", "install", "--local"], cwd=self.src_dir, env=env)
+        self._run_cmd(["git", "lfs", "pull"], cwd=self.src_dir, env=env)
+
+        super(OpenNSABuilder, self).build(install_dirs, reconfigure)
+
+
 class SqliteBuilder(BuilderBase):
     def __init__(self, build_opts, ctx, manifest, src_dir, build_dir, inst_dir):
         super(SqliteBuilder, self).__init__(
@@ -789,3 +809,66 @@ install(FILES sqlite3.h sqlite3ext.h DESTINATION include)
             ],
             env=env,
         )
+
+
+class CargoBuilder(BuilderBase):
+    def __init__(
+        self, build_opts, ctx, manifest, src_dir, build_dir, inst_dir, build_doc
+    ):
+        super(CargoBuilder, self).__init__(
+            build_opts, ctx, manifest, src_dir, build_dir, inst_dir
+        )
+        self.build_doc = build_doc
+
+    def run_cargo(self, install_dirs, operation, args=None):
+        args = args or []
+        env = self._compute_env(install_dirs)
+        # Enable using nightly features with stable compiler
+        env["RUSTC_BOOTSTRAP"] = "1"
+        cmd = ["cargo", operation, "-j%s" % self.build_opts.num_jobs] + args
+        self._run_cmd(cmd, cwd=self.build_source_dir(), env=env)
+
+    def build_source_dir(self):
+        return os.path.join(self.build_dir, "source")
+
+    def recreate_dir(self, src, dst):
+        if os.path.isdir(dst):
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+
+    def _build(self, install_dirs, reconfigure):
+        build_source_dir = self.build_source_dir()
+        self.recreate_dir(self.src_dir, build_source_dir)
+
+        dot_cargo_dir = os.path.join(build_source_dir, ".cargo")
+        if not os.path.isdir(dot_cargo_dir):
+            os.mkdir(dot_cargo_dir)
+
+        with open(os.path.join(dot_cargo_dir, "config"), "w+") as f:
+            f.write(
+                """\
+[build]
+target-dir = '''{}'''
+[net]
+git-fetch-with-cli = true
+""".format(
+                    self.build_dir.replace("\\", "\\\\")
+                )
+            )
+
+        try:
+            from getdeps.facebook.lfs import crates_io_download
+
+            crates_io_download(self.build_opts, self.build_dir, build_source_dir)
+        except ImportError:
+            # This FB internal module isn't shippped to github,
+            # so just rely on cargo downloading crates on it's own
+            pass
+
+        self.run_cargo(install_dirs, "build")
+        self.recreate_dir(build_source_dir, os.path.join(self.inst_dir, "source"))
+
+    def run_tests(self, install_dirs, schedule_type, owner):
+        self.run_cargo(install_dirs, "test")
+        if self.build_doc:
+            self.run_cargo(install_dirs, "doc", ["--no-deps"])
