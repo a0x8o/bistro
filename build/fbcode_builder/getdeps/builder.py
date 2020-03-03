@@ -982,24 +982,12 @@ path = "/dev/null"
         dep_to_git = {}
         for dep in dependencies.keys():
             dep_manifest = self.loader.load_manifest(dep)
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> axbaretto
             dep_builder = dep_manifest.get("build", "builder", ctx=self.ctx)
             if dep_builder not in ["cargo", "nop"] or dep == "rust":
                 # This is a direct dependency, but it is not build with cargo
                 # and it is not simply copying files with nop, so ignore it.
                 # The "rust" dependency is an exception since it contains the
                 # toolchain.
-<<<<<<< HEAD
-=======
-=======
-            if dep_manifest.get("build", "builder", ctx=self.ctx) != "cargo":
-                # This is a direct dependency, but it is not build with cargo
-                # so ignore it.
->>>>>>> 22ac46210141c32f9b8d6be8856625e88d3a472b
->>>>>>> axbaretto
                 continue
 
             git_conf = dep_manifest.get_section_as_dict("git", ctx=self.ctx)
@@ -1007,20 +995,10 @@ path = "/dev/null"
                 raise Exception(
                     "A cargo dependency requires git.repo_url to be defined."
                 )
-<<<<<<< HEAD
-=======
-<<<<<<< HEAD
->>>>>>> axbaretto
             source_dir = self.loader.get_project_install_dir(dep_manifest)
             if dep_builder == "cargo":
                 source_dir = os.path.join(source_dir, "source")
             git_conf["source_dir"] = source_dir
-<<<<<<< HEAD
-=======
-=======
-            git_conf["inst_dir"] = self.loader.get_project_install_dir(dep_manifest)
->>>>>>> 22ac46210141c32f9b8d6be8856625e88d3a472b
->>>>>>> axbaretto
             dep_to_git[dep] = git_conf
         return dep_to_git
 
@@ -1070,15 +1048,7 @@ path = "/dev/null"
         Tries to find <crate> in git_conf["inst_dir"] by searching a [package]
         keyword followed by name = "<crate>".
         """
-<<<<<<< HEAD
         source_dir = git_conf["source_dir"]
-=======
-<<<<<<< HEAD
-        source_dir = git_conf["source_dir"]
-=======
-        source_dir = os.path.join(git_conf["inst_dir"], "source")
->>>>>>> 22ac46210141c32f9b8d6be8856625e88d3a472b
->>>>>>> axbaretto
         search_pattern = '[package]\nname = "{}"'.format(crate)
 
         for root, _, files in os.walk(source_dir):
