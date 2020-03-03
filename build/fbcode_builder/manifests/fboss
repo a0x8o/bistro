@@ -32,7 +32,10 @@ libnl
 libsai
 OpenNSA
 re2
+<<<<<<< HEAD
 Python-3.7.6
+=======
+>>>>>>> 22ac46210141c32f9b8d6be8856625e88d3a472b
 
 [shipit.pathmap]
 fbcode/fboss/github = .
