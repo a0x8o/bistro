@@ -12,11 +12,13 @@ import os
 from .builder import (
     AutoconfBuilder,
     Boost,
+    CargoBuilder,
     CMakeBuilder,
     Iproute2Builder,
     MakeBuilder,
     NinjaBootstrap,
     NopBuilder,
+    OpenNSABuilder,
     OpenSSLBuilder,
     SqliteBuilder,
 )
@@ -67,6 +69,10 @@ SCHEMA = {
         },
     },
     "msbuild": {"optional_section": True, "fields": {"project": REQUIRED}},
+    "cargo": {
+        "optional_section": True,
+        "fields": {"build_doc": OPTIONAL, "workspace_dir": OPTIONAL},
+    },
     "cmake.defines": {"optional_section": True},
     "autoconf.args": {"optional_section": True},
     "b2.args": {"optional_section": True},
@@ -361,7 +367,7 @@ class ManifestParser(object):
             "project %s has no fetcher configuration matching %s" % (self.name, ctx)
         )
 
-    def create_builder(self, build_options, src_dir, build_dir, inst_dir, ctx):
+    def create_builder(self, build_options, src_dir, build_dir, inst_dir, ctx, loader):
         builder = self.get("build", "builder", ctx=ctx)
         if not builder:
             raise Exception("project %s has no builder for %r" % (self.name, ctx))
@@ -415,6 +421,24 @@ class ManifestParser(object):
             return Iproute2Builder(
                 build_options, ctx, self, src_dir, build_dir, inst_dir
             )
+
+        if builder == "cargo":
+            build_doc = self.get("cargo", "build_doc", False, ctx)
+            workspace_dir = self.get("cargo", "workspace_dir", "", ctx)
+            return CargoBuilder(
+                build_options,
+                ctx,
+                self,
+                src_dir,
+                build_dir,
+                inst_dir,
+                build_doc,
+                workspace_dir,
+                loader,
+            )
+
+        if builder == "OpenNSA":
+            return OpenNSABuilder(build_options, ctx, self, src_dir, inst_dir)
 
         raise KeyError("project %s has no known builder" % (self.name))
 

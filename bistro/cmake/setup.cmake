@@ -25,6 +25,7 @@ set(
   libfmt.so
   libglog.so
   libgflags.so
+  libboost_context.so
   libboost_date_time.so
   libboost_regex.so
   libboost_system.so
@@ -49,6 +50,7 @@ set(
   libprotocol.so
   libthrift-core.so
   libthriftcpp2.so
+  libthriftmetadata.so
   libthriftprotocol.so
   libtransport.so
 )
