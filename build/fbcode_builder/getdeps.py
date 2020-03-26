@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright (c) Facebook, Inc. and its affiliates.
 #
 # This source code is licensed under the MIT license found in the
@@ -629,13 +629,19 @@ jobs:
         out.write("    steps:\n")
         out.write("    - uses: actions/checkout@v1\n")
 
+        if build_opts.is_windows():
+            # The git installation may not like long filenames, so tell it
+            # that we want it to use them!
+            out.write("    - name: Fix Git config\n")
+            out.write("      run: git config --system core.longpaths true\n")
+
         projects = loader.manifests_in_dependency_order()
 
         for m in projects:
             if m != manifest:
                 out.write("    - name: Fetch %s\n" % m.name)
                 out.write(
-                    "      run: python build/fbcode_builder/getdeps.py fetch "
+                    "      run: python3 build/fbcode_builder/getdeps.py fetch "
                     "--no-tests %s\n" % m.name
                 )
 
@@ -643,19 +649,19 @@ jobs:
             if m != manifest:
                 out.write("    - name: Build %s\n" % m.name)
                 out.write(
-                    "      run: python build/fbcode_builder/getdeps.py build "
+                    "      run: python3 build/fbcode_builder/getdeps.py build "
                     "--no-tests %s\n" % m.name
                 )
 
         out.write("    - name: Build %s\n" % manifest.name)
         out.write(
-            "      run: python build/fbcode_builder/getdeps.py build --src-dir=. %s\n"
+            "      run: python3 build/fbcode_builder/getdeps.py build --src-dir=. %s\n"
             % manifest.name
         )
 
         out.write("    - name: Copy artifacts\n")
         out.write(
-            "      run: python build/fbcode_builder/getdeps.py fixup-dyn-deps "
+            "      run: python3 build/fbcode_builder/getdeps.py fixup-dyn-deps "
             "--src-dir=. %s _artifacts/%s\n" % (manifest.name, job_name)
         )
         out.write("    - uses: actions/upload-artifact@master\n")
@@ -665,7 +671,7 @@ jobs:
 
         out.write("    - name: Test %s\n" % manifest.name)
         out.write(
-            "      run: python build/fbcode_builder/getdeps.py test --src-dir=. %s\n"
+            "      run: python3 build/fbcode_builder/getdeps.py test --src-dir=. %s\n"
             % manifest.name
         )
 
