@@ -133,6 +133,10 @@ class ProjectCmdBase(SubCmd):
             project, path = parse_project_arg(arg, "--install-dir")
             loader.set_project_install_dir(project, path)
 
+        for arg in args.project_install_prefix:
+            project, path = parse_project_arg(arg, "--install-prefix")
+            loader.set_project_install_prefix(project, path)
+
     def setup_parser(self, parser):
         parser.add_argument(
             "project",
@@ -182,6 +186,12 @@ class ProjectCmdBase(SubCmd):
             help="Explicitly specify the install directory to use for the "
             "project, instead of the default location in the scratch path. "
             "This only affects the project specified, and not its dependencies.",
+        )
+        parser.add_argument(
+            "--project-install-prefix",
+            default=[],
+            action="append",
+            help="Specify the final deployment installation path for a project",
         )
 
         self.setup_project_cmd_parser(parser)
@@ -341,7 +351,7 @@ class ShowInstDirCmd(ProjectCmdBase):
             manifests = [manifest]
 
         for m in manifests:
-            inst_dir = loader.get_project_install_dir(m)
+            inst_dir = loader.get_project_install_dir_respecting_install_prefix(m)
             print(inst_dir)
 
     def setup_project_cmd_parser(self, parser):
@@ -415,7 +425,13 @@ class BuildCmd(ProjectCmdBase):
                         os.unlink(built_marker)
                     src_dir = fetcher.get_src_dir()
                     builder = m.create_builder(
-                        loader.build_opts, src_dir, build_dir, inst_dir, ctx, loader
+                        loader.build_opts,
+                        src_dir,
+                        build_dir,
+                        inst_dir,
+                        ctx,
+                        loader,
+                        final_install_prefix=loader.get_project_install_prefix(m),
                     )
                     builder.build(install_dirs, reconfigure=reconfigure)
 
@@ -505,7 +521,7 @@ class FixupDeps(ProjectCmdBase):
         install_dirs = []
 
         for m in projects:
-            inst_dir = loader.get_project_install_dir(m)
+            inst_dir = loader.get_project_install_dir_respecting_install_prefix(m)
             install_dirs.append(inst_dir)
 
             if m == manifest:
@@ -610,6 +626,13 @@ jobs:
         if manifest.get("build", "builder", ctx=manifest_ctx) == "nop":
             return None
 
+        # We want to be sure that we're running things with python 3
+        # but python versioning is honestly a bit of a frustrating mess.
+        # `python` may be version 2 or version 3 depending on the system.
+        # python3 may not be a thing at all!
+        # Assume an optimistic default
+        py3 = "python3"
+
         if build_opts.is_linux():
             job_name = "linux"
             runs_on = "ubuntu-18.04"
@@ -620,9 +643,14 @@ jobs:
             # buildable with Visual Studio 2019
             job_name = "windows"
             runs_on = "windows-2016"
+            # The windows runners are python 3 by default; python2.exe
+            # is available if needed.
+            py3 = "python"
         else:
             job_name = "mac"
             runs_on = "macOS-latest"
+
+        getdeps = f"{py3} build/fbcode_builder/getdeps.py"
 
         out.write("  %s:\n" % job_name)
         out.write("    runs-on: %s\n" % runs_on)
@@ -640,30 +668,29 @@ jobs:
         for m in projects:
             if m != manifest:
                 out.write("    - name: Fetch %s\n" % m.name)
-                out.write(
-                    "      run: python3 build/fbcode_builder/getdeps.py fetch "
-                    "--no-tests %s\n" % m.name
-                )
+                out.write(f"      run: {getdeps} fetch --no-tests {m.name}\n")
 
         for m in projects:
             if m != manifest:
                 out.write("    - name: Build %s\n" % m.name)
-                out.write(
-                    "      run: python3 build/fbcode_builder/getdeps.py build "
-                    "--no-tests %s\n" % m.name
-                )
+                out.write(f"      run: {getdeps} build --no-tests {m.name}\n")
 
         out.write("    - name: Build %s\n" % manifest.name)
+
+        project_prefix = ""
+        if not build_opts.is_windows():
+            project_prefix = " --project-install-prefix %s:/usr/local" % manifest.name
+
         out.write(
-            "      run: python3 build/fbcode_builder/getdeps.py build --src-dir=. %s\n"
-            % manifest.name
+            f"      run: {getdeps} build --src-dir=. {manifest.name} {project_prefix}\n"
         )
 
         out.write("    - name: Copy artifacts\n")
         out.write(
-            "      run: python3 build/fbcode_builder/getdeps.py fixup-dyn-deps "
-            "--src-dir=. %s _artifacts/%s\n" % (manifest.name, job_name)
+            f"      run: {getdeps} fixup-dyn-deps "
+            f"--src-dir=. {manifest.name} _artifacts/{job_name} --final-install-prefix /usr/local\n"
         )
+
         out.write("    - uses: actions/upload-artifact@master\n")
         out.write("      with:\n")
         out.write("        name: %s\n" % manifest.name)
@@ -671,8 +698,7 @@ jobs:
 
         out.write("    - name: Test %s\n" % manifest.name)
         out.write(
-            "      run: python3 build/fbcode_builder/getdeps.py test --src-dir=. %s\n"
-            % manifest.name
+            f"      run: {getdeps} test --src-dir=. {manifest.name} {project_prefix}\n"
         )
 
     def setup_project_cmd_parser(self, parser):
