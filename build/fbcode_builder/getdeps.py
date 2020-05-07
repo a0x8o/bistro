@@ -21,7 +21,11 @@ import getdeps.cache as cache_module
 from getdeps.buildopts import setup_build_options
 from getdeps.dyndeps import create_dyn_dep_munger
 from getdeps.errors import TransientFailure
-from getdeps.fetcher import SystemPackageFetcher
+from getdeps.fetcher import (
+    SystemPackageFetcher,
+    file_name_is_cmake_file,
+    list_files_under_dir_newer_than_timestamp,
+)
 from getdeps.load import ManifestLoader
 from getdeps.manifest import ManifestParser
 from getdeps.platform import HostType
@@ -229,6 +233,10 @@ class CachedProject(object):
         """ We only cache third party projects """
         return self.cache and self.m.shipit_project is None
 
+    def was_cached(self):
+        cached_marker = os.path.join(self.inst_dir, ".getdeps-cached-build")
+        return os.path.exists(cached_marker)
+
     def download(self):
         if self.is_cacheable() and not os.path.exists(self.inst_dir):
             print("check cache for %s" % self.cache_file_name)
@@ -243,6 +251,11 @@ class CachedProject(object):
                         "Extracting %s -> %s..." % (self.cache_file_name, self.inst_dir)
                     )
                     tf.extractall(self.inst_dir)
+
+                    cached_marker = os.path.join(self.inst_dir, ".getdeps-cached-build")
+                    with open(cached_marker, "w") as f:
+                        f.write("\n")
+
                     return True
             except Exception as exc:
                 print("%s" % str(exc))
@@ -467,6 +480,17 @@ class BuildCmd(ProjectCmdBase):
                     cached_project, fetcher, m, built_marker, project_hash
                 )
 
+                if os.path.exists(built_marker) and not cached_project.was_cached():
+                    # We've previously built this. We may need to reconfigure if
+                    # our deps have changed, so let's check them.
+                    dep_reconfigure, dep_build = self.compute_dep_change_status(
+                        m, built_marker, loader
+                    )
+                    if dep_reconfigure:
+                        reconfigure = True
+                    if dep_build:
+                        sources_changed = True
+
                 if sources_changed or reconfigure or not os.path.exists(built_marker):
                     if os.path.exists(built_marker):
                         os.unlink(built_marker)
@@ -490,6 +514,42 @@ class BuildCmd(ProjectCmdBase):
                         cached_project.upload()
 
             install_dirs.append(inst_dir)
+
+    def compute_dep_change_status(self, m, built_marker, loader):
+        reconfigure = False
+        sources_changed = False
+        st = os.lstat(built_marker)
+
+        ctx = loader.ctx_gen.get_context(m.name)
+        dep_list = sorted(m.get_section_as_dict("dependencies", ctx).keys())
+        for dep in dep_list:
+            if reconfigure and sources_changed:
+                break
+
+            dep_manifest = loader.load_manifest(dep)
+            dep_root = loader.get_project_install_dir(dep_manifest)
+            for dep_file in list_files_under_dir_newer_than_timestamp(
+                dep_root, st.st_mtime
+            ):
+                if os.path.basename(dep_file) == ".built-by-getdeps":
+                    continue
+                if file_name_is_cmake_file(dep_file):
+                    if not reconfigure:
+                        reconfigure = True
+                        print(
+                            f"Will reconfigure cmake because {dep_file} is newer than {built_marker}"
+                        )
+                else:
+                    if not sources_changed:
+                        sources_changed = True
+                        print(
+                            f"Will run build because {dep_file} is newer than {built_marker}"
+                        )
+
+                if reconfigure and sources_changed:
+                    break
+
+        return reconfigure, sources_changed
 
     def compute_source_change_status(
         self, cached_project, fetcher, m, built_marker, project_hash
@@ -517,6 +577,10 @@ class BuildCmd(ProjectCmdBase):
                     os.unlink(built_marker)
                     reconfigure = True
                     sources_changed = True
+                    # While we don't need to consult the fetcher for the
+                    # status in this case, we may still need to have eg: shipit
+                    # run in order to have a correct source tree.
+                    fetcher.update()
 
             if check_fetcher:
                 change_status = fetcher.update()
@@ -578,9 +642,9 @@ class FixupDeps(ProjectCmdBase):
                 dep_munger.process_deps(args.destdir, args.final_install_prefix)
 
     def setup_project_cmd_parser(self, parser):
-        parser.add_argument("destdir", help=("Where to copy the fixed up executables"))
+        parser.add_argument("destdir", help="Where to copy the fixed up executables")
         parser.add_argument(
-            "--final-install-prefix", help=("specify the final installation prefix")
+            "--final-install-prefix", help="specify the final installation prefix"
         )
         parser.add_argument(
             "--strip",

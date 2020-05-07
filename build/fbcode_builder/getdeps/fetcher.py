@@ -35,6 +35,16 @@ except ImportError:
     from urllib.request import urlretrieve
 
 
+def file_name_is_cmake_file(file_name):
+    file_name = file_name.lower()
+    base = os.path.basename(file_name)
+    return (
+        base.endswith(".cmake")
+        or base.endswith(".cmake.in")
+        or base == "cmakelists.txt"
+    )
+
+
 class ChangeStatus(object):
     """ Indicates the nature of changes that happened while updating
     the source directory.  There are two broad uses:
@@ -71,12 +81,13 @@ class ChangeStatus(object):
         might need to rebuild, so we ignore it.
         Otherwise we record the file as a source file change. """
 
-        if "cmake" in file_name.lower():
+        file_name = file_name.lower()
+        if file_name_is_cmake_file(file_name):
             self.make_files += 1
-            return
-        if "/fbcode_builder/" in file_name:
-            return
-        self.source_files += 1
+        elif "/fbcode_builder/cmake" in file_name:
+            self.source_files += 1
+        elif "/fbcode_builder/" not in file_name:
+            self.source_files += 1
 
     def sources_changed(self):
         """ Returns true if any source files were changed during
@@ -350,6 +361,15 @@ def copy_if_different(src_name, dest_name):
         shutil.copy2(src_name, dest_name)
 
     return True
+
+
+def list_files_under_dir_newer_than_timestamp(dir_to_scan, ts):
+    for root, _dirs, files in os.walk(dir_to_scan):
+        for src_file in files:
+            full_name = os.path.join(root, src_file)
+            st = os.lstat(full_name)
+            if st.st_mtime > ts:
+                yield full_name
 
 
 class ShipitPathMap(object):
@@ -639,7 +659,7 @@ def download_url_to_file_with_progress(url, file_name):
     end = time.time()
     sys.stdout.write(" [Complete in %f seconds]\n" % (end - start))
     sys.stdout.flush()
-    print("%s" % (headers))
+    print(f"{headers}")
 
 
 class ArchiveFetcher(Fetcher):
