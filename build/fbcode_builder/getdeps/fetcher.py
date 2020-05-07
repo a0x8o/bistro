@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 # Copyright (c) Facebook, Inc. and its affiliates.
 #
 # This source code is licensed under the MIT license found in the
@@ -16,6 +17,8 @@ import sys
 import tarfile
 import time
 import zipfile
+from datetime import datetime
+from typing import Dict, NamedTuple
 
 from .copytree import prefetch_dir_if_eden
 from .envfuncs import Env
@@ -30,6 +33,16 @@ try:
 except ImportError:
     from urllib.parse import urlparse
     from urllib.request import urlretrieve
+
+
+def file_name_is_cmake_file(file_name):
+    file_name = file_name.lower()
+    base = os.path.basename(file_name)
+    return (
+        base.endswith(".cmake")
+        or base.endswith(".cmake.in")
+        or base == "cmakelists.txt"
+    )
 
 
 class ChangeStatus(object):
@@ -68,12 +81,13 @@ class ChangeStatus(object):
         might need to rebuild, so we ignore it.
         Otherwise we record the file as a source file change. """
 
-        if "cmake" in file_name.lower():
+        file_name = file_name.lower()
+        if file_name_is_cmake_file(file_name):
             self.make_files += 1
-            return
-        if "/fbcode_builder/" in file_name:
-            return
-        self.source_files += 1
+        elif "/fbcode_builder/cmake" in file_name:
+            self.source_files += 1
+        elif "/fbcode_builder/" not in file_name:
+            self.source_files += 1
 
     def sources_changed(self):
         """ Returns true if any source files were changed during
@@ -146,6 +160,46 @@ class LocalDirFetcher(object):
 
     def get_src_dir(self):
         return self.path
+
+
+class SystemPackageFetcher(object):
+    def __init__(self, build_options, packages):
+        self.manager = build_options.host_type.get_package_manager()
+        self.packages = packages.get(self.manager)
+        if self.packages:
+            self.installed = None
+        else:
+            self.installed = False
+
+    def packages_are_installed(self):
+        if self.installed is not None:
+            return self.installed
+
+        if self.manager == "rpm":
+            result = run_cmd(["rpm", "-q"] + self.packages, allow_fail=True)
+            self.installed = result == 0
+        elif self.manager == "deb":
+            result = run_cmd(["dpkg", "-s"] + self.packages, allow_fail=True)
+            self.installed = result == 0
+        else:
+            self.installed = False
+
+        return self.installed
+
+    def update(self):
+        assert self.installed
+        return ChangeStatus(all_changed=False)
+
+    def hash(self):
+        return "0" * 40
+
+    def get_src_dir(self):
+        return None
+
+
+class PreinstalledNopFetcher(SystemPackageFetcher):
+    def __init__(self):
+        self.installed = True
 
 
 class GitFetcher(Fetcher):
@@ -309,6 +363,15 @@ def copy_if_different(src_name, dest_name):
     return True
 
 
+def list_files_under_dir_newer_than_timestamp(dir_to_scan, ts):
+    for root, _dirs, files in os.walk(dir_to_scan):
+        for src_file in files:
+            full_name = os.path.join(root, src_file)
+            st = os.lstat(full_name)
+            if st.st_mtime > ts:
+                yield full_name
+
+
 class ShipitPathMap(object):
     def __init__(self):
         self.roots = []
@@ -424,29 +487,41 @@ class ShipitPathMap(object):
         return change_status
 
 
-FBSOURCE_REPO_HASH = {}
+class FbsourceRepoData(NamedTuple):
+    hash: str
+    date: str
 
 
-def get_fbsource_repo_hash(build_options):
-    """ Returns the hash for the fbsource repo.
+FBSOURCE_REPO_DATA: Dict[str, FbsourceRepoData] = {}
+
+
+def get_fbsource_repo_data(build_options):
+    """ Returns the commit metadata for the fbsource repo.
     Since we may have multiple first party projects to
     hash, and because we don't mutate the repo, we cache
     this hash in a global. """
-    global FBSOURCE_REPO_HASH
-    cached_hash = FBSOURCE_REPO_HASH.get(build_options.fbsource_dir)
-    if cached_hash:
-        return cached_hash
+    cached_data = FBSOURCE_REPO_DATA.get(build_options.fbsource_dir)
+    if cached_data:
+        return cached_data
 
-    cmd = ["hg", "log", "-r.", "-T{node}"]
+    cmd = ["hg", "log", "-r.", "-T{node}\n{date|hgdate}"]
     env = Env()
     env.set("HGPLAIN", "1")
-    cached_hash = subprocess.check_output(
+    log_data = subprocess.check_output(
         cmd, cwd=build_options.fbsource_dir, env=dict(env.items())
     ).decode("ascii")
 
-    FBSOURCE_REPO_HASH[build_options.fbsource_dir] = cached_hash
+    (hash, datestr) = log_data.split("\n")
 
-    return cached_hash
+    # datestr is like "seconds fractionalseconds"
+    # We want "20200324.113140"
+    (unixtime, _fractional) = datestr.split(" ")
+    date = datetime.fromtimestamp(int(unixtime)).strftime("%Y%m%d.%H%M%S")
+    cached_data = FbsourceRepoData(hash=hash, date=date)
+
+    FBSOURCE_REPO_DATA[build_options.fbsource_dir] = cached_data
+
+    return cached_data
 
 
 class SimpleShipitTransformerFetcher(Fetcher):
@@ -576,7 +651,7 @@ def download_url_to_file_with_progress(url, file_name):
     start = time.time()
     try:
         (_filename, headers) = urlretrieve(url, file_name, reporthook=progress.progress)
-    except (OSError, IOError) as exc:
+    except (OSError, IOError) as exc:  # noqa: B014
         raise TransientFailure(
             "Failed to download %s to %s: %s" % (url, file_name, str(exc))
         )
@@ -584,7 +659,7 @@ def download_url_to_file_with_progress(url, file_name):
     end = time.time()
     sys.stdout.write(" [Complete in %f seconds]\n" % (end - start))
     sys.stdout.flush()
-    print("%s" % (headers))
+    print(f"{headers}")
 
 
 class ArchiveFetcher(Fetcher):

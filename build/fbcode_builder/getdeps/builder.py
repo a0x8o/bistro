@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 
+from .dyndeps import create_dyn_dep_munger
 from .envfuncs import Env, add_path_entry, path_search
 from .fetcher import copy_if_different
 from .runcmd import run_cmd
@@ -19,7 +20,15 @@ from .runcmd import run_cmd
 
 class BuilderBase(object):
     def __init__(
-        self, build_opts, ctx, manifest, src_dir, build_dir, inst_dir, env=None
+        self,
+        build_opts,
+        ctx,
+        manifest,
+        src_dir,
+        build_dir,
+        inst_dir,
+        env=None,
+        final_install_prefix=None,
     ):
         self.env = Env()
         if env:
@@ -35,6 +44,7 @@ class BuilderBase(object):
         self.inst_dir = inst_dir
         self.build_opts = build_opts
         self.manifest = manifest
+        self.final_install_prefix = final_install_prefix
 
     def _get_cmd_prefix(self):
         if self.build_opts.is_windows():
@@ -47,7 +57,7 @@ class BuilderBase(object):
                 return [vcvarsall, "amd64", "&&"]
         return []
 
-    def _run_cmd(self, cmd, cwd=None, env=None):
+    def _run_cmd(self, cmd, cwd=None, env=None, use_cmd_prefix=True):
         if env:
             e = self.env.copy()
             e.update(env)
@@ -55,9 +65,10 @@ class BuilderBase(object):
         else:
             env = self.env
 
-        cmd_prefix = self._get_cmd_prefix()
-        if cmd_prefix:
-            cmd = cmd_prefix + cmd
+        if use_cmd_prefix:
+            cmd_prefix = self._get_cmd_prefix()
+            if cmd_prefix:
+                cmd = cmd_prefix + cmd
 
         log_file = os.path.join(self.build_dir, "getdeps_build.log")
         run_cmd(cmd=cmd, env=env, cwd=cwd or self.build_dir, log_file=log_file)
@@ -71,6 +82,16 @@ class BuilderBase(object):
                 reconfigure = True
 
         self._build(install_dirs=install_dirs, reconfigure=reconfigure)
+
+        # On Windows, emit a wrapper script that can be used to run build artifacts
+        # directly from the build directory, without installing them.  On Windows $PATH
+        # needs to be updated to include all of the directories containing the runtime
+        # library dependencies in order to run the binaries.
+        if self.build_opts.is_windows():
+            script_path = self.get_dev_run_script_path()
+            dep_munger = create_dyn_dep_munger(self.build_opts, install_dirs)
+            dep_dirs = self.get_dev_run_extra_path_dirs(install_dirs, dep_munger)
+            dep_munger.emit_dev_run_script(script_path, dep_dirs)
 
     def run_tests(self, install_dirs, schedule_type, owner):
         """ Execute any tests that we know how to run.  If they fail,
@@ -90,6 +111,16 @@ class BuilderBase(object):
         # CMAKE_PREFIX_PATH is only respected when passed through the
         # environment, so we construct an appropriate path to pass down
         return self.build_opts.compute_env_for_install_dirs(install_dirs, env=self.env)
+
+    def get_dev_run_script_path(self):
+        assert self.build_opts.is_windows()
+        return os.path.join(self.build_dir, "run.ps1")
+
+    def get_dev_run_extra_path_dirs(self, install_dirs, dep_munger=None):
+        assert self.build_opts.is_windows()
+        if dep_munger is None:
+            dep_munger = create_dyn_dep_munger(self.build_opts, install_dirs)
+        return dep_munger.compute_dependency_paths(self.build_dir)
 
 
 class MakeBuilder(BuilderBase):
@@ -213,6 +244,17 @@ CMAKE_ENV = {env_str}
 CMAKE_DEFINE_ARGS = {define_args_str}
 
 
+def get_jobs_argument(num_jobs_arg: int) -> str:
+    if num_jobs_arg > 0:
+        return "-j" + str(num_jobs_arg)
+
+    import multiprocessing
+    num_jobs = multiprocessing.cpu_count()
+    if sys.platform == "win32":
+        num_jobs //= 2
+    return "-j" + str(num_jobs)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument(
@@ -234,6 +276,14 @@ def main():
       const="build",
       dest="mode",
       help="An alias for --mode=build",
+    )
+    ap.add_argument(
+      "-j",
+      "--num-jobs",
+      action="store",
+      type=int,
+      default=0,
+      help="Run the build or tests with the specified number of parallel jobs",
     )
     ap.add_argument(
       "--install",
@@ -269,9 +319,14 @@ def main():
                 target,
                 "--config",
                 "Release",
+                get_jobs_argument(args.num_jobs),
         ] + args.cmake_args
     elif args.mode == "test":
-        full_cmd = CMD_PREFIX + [CTEST] + args.cmake_args
+        full_cmd = CMD_PREFIX + [
+            {dev_run_script}CTEST,
+            "--output-on-failure",
+            get_jobs_argument(args.num_jobs),
+        ] + args.cmake_args
     else:
         ap.error("unknown invocation mode: %s" % (args.mode,))
 
@@ -286,15 +341,33 @@ if __name__ == "__main__":
 """
 
     def __init__(
-        self, build_opts, ctx, manifest, src_dir, build_dir, inst_dir, defines
+        self,
+        build_opts,
+        ctx,
+        manifest,
+        src_dir,
+        build_dir,
+        inst_dir,
+        defines,
+        final_install_prefix=None,
     ):
         super(CMakeBuilder, self).__init__(
-            build_opts, ctx, manifest, src_dir, build_dir, inst_dir
+            build_opts,
+            ctx,
+            manifest,
+            src_dir,
+            build_dir,
+            inst_dir,
+            final_install_prefix=final_install_prefix,
         )
         self.defines = defines or {}
 
     def _invalidate_cache(self):
-        for name in ["CMakeCache.txt", "CMakeFiles"]:
+        for name in [
+            "CMakeCache.txt",
+            "CMakeFiles/CMakeError.log",
+            "CMakeFiles/CMakeOutput.log",
+        ]:
             name = os.path.join(self.build_dir, name)
             if os.path.isdir(name):
                 shutil.rmtree(name)
@@ -311,6 +384,13 @@ if __name__ == "__main__":
     def _write_build_script(self, **kwargs):
         env_lines = ["    {!r}: {!r},".format(k, v) for k, v in kwargs["env"].items()]
         kwargs["env_str"] = "\n".join(["{"] + env_lines + ["}"])
+
+        if self.build_opts.is_windows():
+            kwargs["dev_run_script"] = '"powershell.exe", {!r}, '.format(
+                self.get_dev_run_script_path()
+            )
+        else:
+            kwargs["dev_run_script"] = ""
 
         define_arg_lines = ["["]
         for arg in kwargs["define_args"]:
@@ -337,7 +417,7 @@ if __name__ == "__main__":
 
     def _compute_cmake_define_args(self, env):
         defines = {
-            "CMAKE_INSTALL_PREFIX": self.inst_dir,
+            "CMAKE_INSTALL_PREFIX": self.final_install_prefix or self.inst_dir,
             "BUILD_SHARED_LIBS": "OFF",
             # Some of the deps (rsocket) default to UBSAN enabled if left
             # unspecified.  Some of the deps fail to compile in release mode
@@ -352,6 +432,10 @@ if __name__ == "__main__":
             ccache = path_search(env, "ccache")
             if ccache:
                 defines["CMAKE_CXX_COMPILER_LAUNCHER"] = ccache
+        else:
+            # rocksdb does its own probing for ccache.
+            # Ensure that it is disabled on sandcastle
+            env["CCACHE_DISABLE"] = "1"
 
         if "GITHUB_ACTIONS" in os.environ and self.build_opts.is_windows():
             # GitHub actions: the host has both gcc and msvc installed, and
@@ -393,6 +477,8 @@ if __name__ == "__main__":
         reconfigure = reconfigure or self._needs_reconfigure()
 
         env = self._compute_env(install_dirs)
+        if not self.build_opts.is_windows() and self.final_install_prefix:
+            env["DESTDIR"] = self.inst_dir
 
         # Resolve the cmake that we installed
         cmake = path_search(env, "cmake")
@@ -436,6 +522,23 @@ if __name__ == "__main__":
         ctest = path_search(env, "ctest")
         cmake = path_search(env, "cmake")
 
+        # On Windows, we also need to update $PATH to include the directories that
+        # contain runtime library dependencies.  This is not needed on other platforms
+        # since CMake will emit RPATH properly in the binary so they can find these
+        # dependencies.
+        if self.build_opts.is_windows():
+            path_entries = self.get_dev_run_extra_path_dirs(install_dirs)
+            path = env.get("PATH")
+            if path:
+                path_entries.insert(0, path)
+            env["PATH"] = ";".join(path_entries)
+
+        # Don't use the cmd_prefix when running tests.  This is vcvarsall.bat on
+        # Windows.  vcvarsall.bat is only needed for the build, not tests.  It
+        # unfortunately fails if invoked with a long PATH environment variable when
+        # running the tests.
+        use_cmd_prefix = False
+
         def get_property(test, propname, defval=None):
             """ extracts a named property from a cmake test info json blob.
             The properties look like:
@@ -466,6 +569,9 @@ if __name__ == "__main__":
             machine_suffix = self.build_opts.host_type.as_tuple_string()
             for test in data["tests"]:
                 working_dir = get_property(test, "WORKING_DIRECTORY")
+                labels = []
+                if get_property(test, "DISABLED"):
+                    labels.append("disabled")
                 command = test["command"]
                 if working_dir:
                     command = [cmake, "-E", "chdir", working_dir] + command
@@ -475,6 +581,7 @@ if __name__ == "__main__":
                         "target": "%s-%s-getdeps-%s"
                         % (self.manifest.name, test["name"], machine_suffix),
                         "command": command,
+                        "labels": labels,
                     }
                 )
             return tests
@@ -556,11 +663,13 @@ if __name__ == "__main__":
                     testpilot_args + run,
                     cwd=self.build_opts.fbcode_builder_dir,
                     env=env,
+                    use_cmd_prefix=use_cmd_prefix,
                 )
         else:
             self._run_cmd(
                 [ctest, "--output-on-failure", "-j", str(self.build_opts.num_jobs)],
                 env=env,
+                use_cmd_prefix=use_cmd_prefix,
             )
 
 
