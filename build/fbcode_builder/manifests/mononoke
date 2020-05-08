@@ -31,6 +31,7 @@ tools/rust/ossconfigs = .
 # strip all code unrelated to mononoke to prevent triggering unnecessary checks
 ^fbcode/eden/(?!mononoke|scm/lib/xdiff.*)/.*$
 ^fbcode/eden/mononoke/(?!public_autocargo).+/Cargo\.toml$
+^fbcode/configerator/structs/scm/mononoke/(?!public_autocargo).+/Cargo\.toml$
 
 [dependencies]
 fbthrift-rust
