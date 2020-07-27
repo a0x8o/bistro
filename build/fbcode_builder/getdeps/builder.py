@@ -799,19 +799,30 @@ class Boost(BuilderBase):
         self.b2_args = b2_args
 
     def _build(self, install_dirs, reconfigure):
+        env = self._compute_env(install_dirs)
         linkage = ["static"]
         if self.build_opts.is_windows():
             linkage.append("shared")
+
+        args = []
+        if self.build_opts.is_darwin():
+            clang = subprocess.check_output(["xcrun", "--find", "clang"])
+            user_config = os.path.join(self.build_dir, "project-config.jam")
+            with open(user_config, "w") as jamfile:
+                jamfile.write("using clang : : %s ;\n" % clang.decode().strip())
+            args.append("--user-config=%s" % user_config)
+
         for link in linkage:
-            args = []
             if self.build_opts.is_windows():
                 bootstrap = os.path.join(self.src_dir, "bootstrap.bat")
-                self._run_cmd([bootstrap], cwd=self.src_dir)
+                self._run_cmd([bootstrap], cwd=self.src_dir, env=env)
                 args += ["address-model=64"]
             else:
                 bootstrap = os.path.join(self.src_dir, "bootstrap.sh")
                 self._run_cmd(
-                    [bootstrap, "--prefix=%s" % self.inst_dir], cwd=self.src_dir
+                    [bootstrap, "--prefix=%s" % self.inst_dir],
+                    cwd=self.src_dir,
+                    env=env,
                 )
 
             b2 = os.path.join(self.src_dir, "b2")
@@ -835,6 +846,7 @@ class Boost(BuilderBase):
                     "install",
                 ],
                 cwd=self.src_dir,
+                env=env,
             )
 
 
