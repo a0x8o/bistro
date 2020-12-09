@@ -58,7 +58,7 @@ class BuilderBase(object):
                 return [vcvarsall, "amd64", "&&"]
         return []
 
-    def _run_cmd(self, cmd, cwd=None, env=None, use_cmd_prefix=True):
+    def _run_cmd(self, cmd, cwd=None, env=None, use_cmd_prefix=True, allow_fail=False):
         if env:
             e = self.env.copy()
             e.update(env)
@@ -72,7 +72,13 @@ class BuilderBase(object):
                 cmd = cmd_prefix + cmd
 
         log_file = os.path.join(self.build_dir, "getdeps_build.log")
-        run_cmd(cmd=cmd, env=env, cwd=cwd or self.build_dir, log_file=log_file)
+        return run_cmd(
+            cmd=cmd,
+            env=env,
+            cwd=cwd or self.build_dir,
+            log_file=log_file,
+            allow_fail=allow_fail,
+        )
 
     def build(self, install_dirs, reconfigure):
         print("Building %s..." % self.manifest.name)
@@ -94,24 +100,28 @@ class BuilderBase(object):
             dep_dirs = self.get_dev_run_extra_path_dirs(install_dirs, dep_munger)
             dep_munger.emit_dev_run_script(script_path, dep_dirs)
 
-    def run_tests(self, install_dirs, schedule_type, owner, test_filter):
-        """ Execute any tests that we know how to run.  If they fail,
-        raise an exception. """
+    def run_tests(
+        self, install_dirs, schedule_type, owner, test_filter, retry, no_testpilot
+    ):
+        """Execute any tests that we know how to run.  If they fail,
+        raise an exception."""
         pass
 
     def _build(self, install_dirs, reconfigure):
-        """ Perform the build.
+        """Perform the build.
         install_dirs contains the list of installation directories for
         the dependencies of this project.
         reconfigure will be set to true if the fetcher determined
         that the sources have changed in such a way that the build
-        system needs to regenerate its rules. """
+        system needs to regenerate its rules."""
         pass
 
     def _compute_env(self, install_dirs):
         # CMAKE_PREFIX_PATH is only respected when passed through the
         # environment, so we construct an appropriate path to pass down
-        return self.build_opts.compute_env_for_install_dirs(install_dirs, env=self.env)
+        return self.build_opts.compute_env_for_install_dirs(
+            install_dirs, env=self.env, manifest=self.manifest
+        )
 
     def get_dev_run_script_path(self):
         assert self.build_opts.is_windows()
@@ -125,26 +135,54 @@ class BuilderBase(object):
 
 
 class MakeBuilder(BuilderBase):
-    def __init__(self, build_opts, ctx, manifest, src_dir, build_dir, inst_dir, args):
+    def __init__(
+        self,
+        build_opts,
+        ctx,
+        manifest,
+        src_dir,
+        build_dir,
+        inst_dir,
+        build_args,
+        install_args,
+        test_args,
+    ):
         super(MakeBuilder, self).__init__(
             build_opts, ctx, manifest, src_dir, build_dir, inst_dir
         )
-        self.args = args or []
+        self.build_args = build_args or []
+        self.install_args = install_args or []
+        self.test_args = test_args
+
+    def _get_prefix(self):
+        return ["PREFIX=" + self.inst_dir, "prefix=" + self.inst_dir]
 
     def _build(self, install_dirs, reconfigure):
         env = self._compute_env(install_dirs)
 
         # Need to ensure that PREFIX is set prior to install because
-        # libbpf uses it when generating its pkg-config file
+        # libbpf uses it when generating its pkg-config file.
+        # The lowercase prefix is used by some projects.
         cmd = (
             ["make", "-j%s" % self.build_opts.num_jobs]
-            + self.args
-            + ["PREFIX=" + self.inst_dir]
+            + self.build_args
+            + self._get_prefix()
         )
         self._run_cmd(cmd, env=env)
 
-        install_cmd = ["make", "install"] + self.args + ["PREFIX=" + self.inst_dir]
+        install_cmd = ["make"] + self.install_args + self._get_prefix()
         self._run_cmd(install_cmd, env=env)
+
+    def run_tests(
+        self, install_dirs, schedule_type, owner, test_filter, retry, no_testpilot
+    ):
+        if not self.test_args:
+            return
+
+        env = self._compute_env(install_dirs)
+
+        cmd = ["make"] + self.test_args + self._get_prefix()
+        self._run_cmd(cmd, env=env)
 
 
 class AutoconfBuilder(BuilderBase):
@@ -250,9 +288,7 @@ def get_jobs_argument(num_jobs_arg: int) -> str:
         return "-j" + str(num_jobs_arg)
 
     import multiprocessing
-    num_jobs = multiprocessing.cpu_count()
-    if sys.platform == "win32":
-        num_jobs //= 2
+    num_jobs = multiprocessing.cpu_count() // 2
     return "-j" + str(num_jobs)
 
 
@@ -412,8 +448,8 @@ if __name__ == "__main__":
         # CMake manually.
         build_script_path = os.path.join(self.build_dir, "run_cmake.py")
         script_contents = self.MANUAL_BUILD_SCRIPT.format(**kwargs)
-        with open(build_script_path, "w") as f:
-            f.write(script_contents)
+        with open(build_script_path, "wb") as f:
+            f.write(script_contents.encode())
         os.chmod(build_script_path, 0o755)
 
     def _compute_cmake_define_args(self, env):
@@ -524,7 +560,9 @@ if __name__ == "__main__":
             env=env,
         )
 
-    def run_tests(self, install_dirs, schedule_type, owner, test_filter):
+    def run_tests(
+        self, install_dirs, schedule_type, owner, test_filter, retry, no_testpilot
+    ):
         env = self._compute_env(install_dirs)
         ctest = path_search(env, "ctest")
         cmake = path_search(env, "cmake")
@@ -547,7 +585,7 @@ if __name__ == "__main__":
         use_cmd_prefix = False
 
         def get_property(test, propname, defval=None):
-            """ extracts a named property from a cmake test info json blob.
+            """extracts a named property from a cmake test info json blob.
             The properties look like:
             [{"name": "WORKING_DIRECTORY"},
              {"value": "something"}]
@@ -593,8 +631,13 @@ if __name__ == "__main__":
                 )
             return tests
 
+        if schedule_type == "continuous" or schedule_type == "testwarden":
+            # for continuous and testwarden runs, disabling retry can give up
+            # better signals for flaky tests.
+            retry = 0
+
         testpilot = path_search(env, "testpilot")
-        if testpilot:
+        if testpilot and not no_testpilot:
             buck_test_info = list_tests()
             buck_test_info_name = os.path.join(self.build_dir, ".buck-test-info.json")
             with open(buck_test_info_name, "w") as f:
@@ -616,7 +659,7 @@ if __name__ == "__main__":
                 self.build_opts.fbsource_dir,
                 "--buck-test-info",
                 buck_test_info_name,
-                "--retry=3",
+                "--retry=%d" % retry,
                 "-j=%s" % str(self.build_opts.num_jobs),
                 "--test-config",
                 "platform=%s" % machine_suffix,
@@ -679,7 +722,23 @@ if __name__ == "__main__":
             args = [ctest, "--output-on-failure", "-j", str(self.build_opts.num_jobs)]
             if test_filter:
                 args += ["-R", test_filter]
-            self._run_cmd(args, env=env, use_cmd_prefix=use_cmd_prefix)
+
+            count = 0
+            while count <= retry:
+                retcode = self._run_cmd(
+                    args, env=env, use_cmd_prefix=use_cmd_prefix, allow_fail=True
+                )
+
+                if retcode == 0:
+                    break
+                if count == 0:
+                    # Only add this option in the second run.
+                    args += ["--rerun-failed"]
+                count += 1
+            if retcode != 0:
+                # Allow except clause in getdeps.main to catch and exit gracefully
+                # This allows non-testpilot runs to fail through the same logic as failed testpilot runs, which may become handy in case if post test processing is needed in the future
+                raise subprocess.CalledProcessError(retcode, args)
 
 
 class NinjaBootstrap(BuilderBase):
@@ -724,6 +783,9 @@ class OpenSSLBuilder(BuilderBase):
         elif self.build_opts.is_darwin():
             make = "make"
             args = ["darwin64-x86_64-cc"]
+        elif self.build_opts.is_linux():
+            make = "make"
+            args = ["linux-x86_64"]
         else:
             raise Exception("don't know how to build openssl for %r" % self.ctx)
 
@@ -761,19 +823,30 @@ class Boost(BuilderBase):
         self.b2_args = b2_args
 
     def _build(self, install_dirs, reconfigure):
+        env = self._compute_env(install_dirs)
         linkage = ["static"]
         if self.build_opts.is_windows():
             linkage.append("shared")
+
+        args = []
+        if self.build_opts.is_darwin():
+            clang = subprocess.check_output(["xcrun", "--find", "clang"])
+            user_config = os.path.join(self.build_dir, "project-config.jam")
+            with open(user_config, "w") as jamfile:
+                jamfile.write("using clang : : %s ;\n" % clang.decode().strip())
+            args.append("--user-config=%s" % user_config)
+
         for link in linkage:
-            args = []
             if self.build_opts.is_windows():
                 bootstrap = os.path.join(self.src_dir, "bootstrap.bat")
-                self._run_cmd([bootstrap], cwd=self.src_dir)
+                self._run_cmd([bootstrap], cwd=self.src_dir, env=env)
                 args += ["address-model=64"]
             else:
                 bootstrap = os.path.join(self.src_dir, "bootstrap.sh")
                 self._run_cmd(
-                    [bootstrap, "--prefix=%s" % self.inst_dir], cwd=self.src_dir
+                    [bootstrap, "--prefix=%s" % self.inst_dir],
+                    cwd=self.src_dir,
+                    env=env,
                 )
 
             b2 = os.path.join(self.src_dir, "b2")
@@ -797,6 +870,7 @@ class Boost(BuilderBase):
                     "install",
                 ],
                 cwd=self.src_dir,
+                env=env,
             )
 
 
@@ -940,6 +1014,7 @@ class CargoBuilder(BuilderBase):
         inst_dir,
         build_doc,
         workspace_dir,
+        manifests_to_build,
         loader,
     ):
         super(CargoBuilder, self).__init__(
@@ -947,6 +1022,7 @@ class CargoBuilder(BuilderBase):
         )
         self.build_doc = build_doc
         self.ws_dir = workspace_dir
+        self.manifests_to_build = manifests_to_build and manifests_to_build.split(",")
         self.loader = loader
 
     def run_cargo(self, install_dirs, operation, args=None):
@@ -954,6 +1030,7 @@ class CargoBuilder(BuilderBase):
         env = self._compute_env(install_dirs)
         # Enable using nightly features with stable compiler
         env["RUSTC_BOOTSTRAP"] = "1"
+        env["LIBZ_SYS_STATIC"] = "1"
         cmd = [
             "cargo",
             operation,
@@ -966,7 +1043,10 @@ class CargoBuilder(BuilderBase):
         return os.path.join(self.build_dir, "source")
 
     def workspace_dir(self):
-        return os.path.join(self.build_source_dir(), self.ws_dir)
+        return os.path.join(self.build_source_dir(), self.ws_dir or "")
+
+    def manifest_dir(self, manifest):
+        return os.path.join(self.build_source_dir(), manifest)
 
     def recreate_dir(self, src, dst):
         if os.path.isdir(dst):
@@ -986,14 +1066,20 @@ class CargoBuilder(BuilderBase):
                 """\
 [build]
 target-dir = '''{}'''
+
 [net]
 git-fetch-with-cli = true
+
+[profile.dev]
+debug = false
+incremental = false
 """.format(
                     self.build_dir.replace("\\", "\\\\")
                 )
             )
 
-        self._patchup_workspace()
+        if self.ws_dir is not None:
+            self._patchup_workspace()
 
         try:
             from getdeps.facebook.rust import vendored_crates
@@ -1004,18 +1090,46 @@ git-fetch-with-cli = true
             # so just rely on cargo downloading crates on it's own
             pass
 
-        self.run_cargo(install_dirs, "build")
+        if self.manifests_to_build is None:
+            self.run_cargo(
+                install_dirs,
+                "build",
+                ["--out-dir", os.path.join(self.inst_dir, "bin"), "-Zunstable-options"],
+            )
+        else:
+            for manifest in self.manifests_to_build:
+                self.run_cargo(
+                    install_dirs,
+                    "build",
+                    [
+                        "--out-dir",
+                        os.path.join(self.inst_dir, "bin"),
+                        "-Zunstable-options",
+                        "--manifest-path",
+                        self.manifest_dir(manifest),
+                    ],
+                )
+
         self.recreate_dir(build_source_dir, os.path.join(self.inst_dir, "source"))
 
-    def run_tests(self, install_dirs, schedule_type, owner, test_filter):
+    def run_tests(
+        self, install_dirs, schedule_type, owner, test_filter, retry, no_testpilot
+    ):
         if test_filter:
             args = ["--", test_filter]
         else:
-            args = None
+            args = []
 
-        self.run_cargo(install_dirs, "test", args)
-        if self.build_doc:
-            self.run_cargo(install_dirs, "doc", ["--no-deps"])
+        if self.manifests_to_build is None:
+            self.run_cargo(install_dirs, "test", args)
+            if self.build_doc:
+                self.run_cargo(install_dirs, "doc", ["--no-deps"])
+        else:
+            for manifest in self.manifests_to_build:
+                margs = ["--manifest-path", self.manifest_dir(manifest)]
+                self.run_cargo(install_dirs, "test", args + margs)
+                if self.build_doc:
+                    self.run_cargo(install_dirs, "doc", ["--no-deps"] + margs)
 
     def _patchup_workspace(self):
         """
@@ -1040,23 +1154,27 @@ git-fetch-with-cli = true
         workspace_dir = self.workspace_dir()
         config = self._resolve_config()
         if config:
-            with open(os.path.join(workspace_dir, "Cargo.toml"), "a") as f:
-                # A fake manifest has to be crated to change the virtual
-                # manifest into a non-virtual. The virtual manifests are limited
-                # in many ways and the inability to define patches on them is
-                # one. Check https://github.com/rust-lang/cargo/issues/4934 to
-                # see if it is resolved.
-                f.write(
-                    """
-[package]
-name = "fake_manifest_of_{}"
-version = "0.0.0"
-[lib]
-path = "/dev/null"
-""".format(
-                        self.manifest.name
+            with open(os.path.join(workspace_dir, "Cargo.toml"), "r+") as f:
+                manifest_content = f.read()
+                if "[package]" not in manifest_content:
+                    # A fake manifest has to be crated to change the virtual
+                    # manifest into a non-virtual. The virtual manifests are limited
+                    # in many ways and the inability to define patches on them is
+                    # one. Check https://github.com/rust-lang/cargo/issues/4934 to
+                    # see if it is resolved.
+                    f.write(
+                        """
+    [package]
+    name = "fake_manifest_of_{}"
+    version = "0.0.0"
+    [lib]
+    path = "/dev/null"
+    """.format(
+                            self.manifest.name
+                        )
                     )
-                )
+                else:
+                    f.write("\n")
                 f.write(config)
 
     def _resolve_config(self):
@@ -1161,7 +1279,13 @@ path = "/dev/null"
                     continue  # filter out commented lines and ones without git deps
                 for name, conf in dep_to_git.items():
                     if 'git = "{}"'.format(conf["repo_url"]) in line:
-                        crate_name, _, _ = line.partition("=")
+                        pkg_template = ' package = "'
+                        if pkg_template in line:
+                            crate_name, _, _ = line.partition(pkg_template)[
+                                2
+                            ].partition('"')
+                        else:
+                            crate_name, _, _ = line.partition("=")
                         deps_to_crates.setdefault(name, set()).add(crate_name.strip())
         return deps_to_crates
 

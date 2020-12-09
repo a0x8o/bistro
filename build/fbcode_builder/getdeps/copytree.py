@@ -48,31 +48,25 @@ def find_eden_root(dirpath):
 
 
 def prefetch_dir_if_eden(dirpath):
-    """ After an amend/rebase, Eden may need to fetch a large number
+    """After an amend/rebase, Eden may need to fetch a large number
     of trees from the servers.  The simplistic single threaded walk
     performed by copytree makes this more expensive than is desirable
     so we help accelerate things by performing a prefetch on the
-    source directory """
+    source directory"""
     global PREFETCHED_DIRS
-    if is_windows():
-        # prefetch takes longer than not prefetching our opensource
-        # projects until we cut over to the new globfiles implementation
-        return
     if dirpath in PREFETCHED_DIRS:
         return
     root = find_eden_root(dirpath)
     if root is None:
         return
-    rel = os.path.relpath(dirpath, root)
-    print("Prefetching %s..." % rel)
-    subprocess.call(
-        ["edenfsctl", "prefetch", "--repo", root, "--silent", "%s/**" % rel]
-    )
+    glob = f"{os.path.relpath(dirpath, root).replace(os.sep, '/')}/**"
+    print(f"Prefetching {glob}")
+    subprocess.call(["edenfsctl", "prefetch", "--repo", root, "--silent", glob])
     PREFETCHED_DIRS.add(dirpath)
 
 
 def copytree(src_dir, dest_dir, ignore=None):
-    """ Recursively copy the src_dir to the dest_dir, filtering
+    """Recursively copy the src_dir to the dest_dir, filtering
     out entries using the ignore lambda.  The behavior of the
     ignore lambda must match that described by `shutil.copytree`.
     This `copytree` function knows how to prefetch data when
